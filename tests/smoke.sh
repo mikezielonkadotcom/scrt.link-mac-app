@@ -47,10 +47,15 @@ required_sources=(
     "Sources/PreferencesWindow.swift"
     "Sources/DockManager.swift"
     "Sources/UpdateManager.swift"
+    "Sources/Preferences.swift"
+    "Sources/KeychainStore.swift"
+    "Sources/ScrtLinkAPI.swift"
+    "Sources/NativeSecretFormView.swift"
     "Resources/Info.plist"
     "Resources/AppIcon.icns"
     "Resources/StatusBarIcon.png"
     "Resources/StatusBarIcon@2x.png"
+    "Resources/harness.html"
     "build.sh"
     "release.sh"
 )
@@ -118,7 +123,7 @@ else
     fail "binary arch wrong: $(file "$BIN")"
 fi
 
-for r in AppIcon.icns StatusBarIcon.png StatusBarIcon@2x.png; do
+for r in AppIcon.icns StatusBarIcon.png StatusBarIcon@2x.png harness.html; do
     if [ -f "$BUNDLE_PATH/Contents/Resources/$r" ]; then
         pass "bundled resource: $r"
     else

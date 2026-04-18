@@ -5,8 +5,12 @@ import WebKit
 class WebViewController: NSObject, WKNavigationDelegate, WKUIDelegate {
     private var window: NSWindow!
     private var webView: WKWebView!
+    private var nativeForm: NativeSecretFormView?
     private let homeURL = URL(string: "https://scrt.link/")!
-    private var hasLoaded = false
+    private var hasLoadedWeb = false
+    private var currentMode: Mode = .native
+
+    private enum Mode { case native, web }
 
     override init() {
         super.init()
@@ -16,7 +20,6 @@ class WebViewController: NSObject, WKNavigationDelegate, WKUIDelegate {
 
     private func setupWebView() {
         let config = WKWebViewConfiguration()
-        // Persistent store so paid-account cookies survive restarts
         config.websiteDataStore = WKWebsiteDataStore.default()
         config.preferences.isElementFullscreenEnabled = true
 
@@ -38,12 +41,12 @@ class WebViewController: NSObject, WKNavigationDelegate, WKUIDelegate {
 
         window.title = "Scrt.link"
         window.minSize = NSSize(width: 600, height: 500)
-        window.contentView = webView
         window.isReleasedWhenClosed = false
         window.setFrameAutosaveName("ScrtLinkMain")
         window.center()
 
         setupToolbar()
+        applyMode()
     }
 
     private func setupToolbar() {
@@ -54,13 +57,48 @@ class WebViewController: NSObject, WKNavigationDelegate, WKUIDelegate {
         window.toolbar = toolbar
     }
 
+    // MARK: - Mode switching
+
+    private func applyMode() {
+        let desired: Mode = Preferences.useWebUI ? .web : .native
+        switch desired {
+        case .native:
+            if nativeForm == nil {
+                nativeForm = NativeSecretFormView(frame: window.contentView?.bounds ?? .zero)
+            }
+            window.contentView = nativeForm
+            window.title = "Scrt.link"
+        case .web:
+            if !hasLoadedWeb {
+                webView.load(URLRequest(url: homeURL))
+                hasLoadedWeb = true
+            }
+            window.contentView = webView
+            window.title = "Scrt.link"
+        }
+        currentMode = desired
+        // Rebuild toolbar items — native mode doesn't need nav controls
+        window.toolbar?.delegate = self
+        if let t = window.toolbar {
+            // Force rebuild by re-assigning the identifier set
+            while t.items.count > 0 {
+                t.removeItem(at: 0)
+            }
+            for (i, id) in toolbarDefaultItemIdentifiers(t).enumerated() {
+                t.insertItem(withItemIdentifier: id, at: i)
+            }
+        }
+    }
+
+    /// Called from Preferences when the "Use Web UI" toggle changes.
+    func refreshMode() {
+        applyMode()
+    }
+
     // MARK: - Window Management
 
     func showWindow() {
-        if !hasLoaded {
-            webView.load(URLRequest(url: homeURL))
-            hasLoaded = true
-        }
+        applyMode()
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
     }
@@ -77,13 +115,20 @@ class WebViewController: NSObject, WKNavigationDelegate, WKUIDelegate {
         let dataTypes = WKWebsiteDataStore.allWebsiteDataTypes()
         WKWebsiteDataStore.default().removeData(ofTypes: dataTypes, modifiedSince: .distantPast) { @MainActor [weak self] in
             guard let self else { return }
-            self.hasLoaded = false
-            self.webView.load(URLRequest(url: self.homeURL))
+            self.hasLoadedWeb = false
+            if self.currentMode == .web {
+                self.webView.load(URLRequest(url: self.homeURL))
+            }
         }
     }
 
     func reload() {
-        webView.reload()
+        switch currentMode {
+        case .native:
+            nativeForm?.reset()
+        case .web:
+            webView.reload()
+        }
     }
 
     // MARK: - WKNavigationDelegate
@@ -94,9 +139,8 @@ class WebViewController: NSObject, WKNavigationDelegate, WKUIDelegate {
             return
         }
 
-        // Keep scrt.link navigation inside the WebView.
-        // A just-created secret link is ALSO scrt.link/s#... — we want to open
-        // those externally so the user doesn't accidentally burn their own secret.
+        // A just-created secret link (scrt.link/s#...) should open in the
+        // default browser so we don't accidentally burn it.
         if let host = url.host?.lowercased(), host.contains("scrt.link") {
             if navigationAction.navigationType == .linkActivated && url.path.hasPrefix("/s") {
                 NSWorkspace.shared.open(url)
@@ -114,7 +158,6 @@ class WebViewController: NSObject, WKNavigationDelegate, WKUIDelegate {
 
     // MARK: - WKUIDelegate
 
-    // target="_blank"
     func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration, for navigationAction: WKNavigationAction, windowFeatures: WKWindowFeatures) -> WKWebView? {
         if let url = navigationAction.request.url {
             NSWorkspace.shared.open(url)
@@ -167,8 +210,9 @@ extension WebViewController: NSToolbarDelegate {
 
         case "Reload":
             let item = NSToolbarItem(itemIdentifier: itemIdentifier)
-            item.label = "Reload"
-            item.image = NSImage(systemSymbolName: "arrow.clockwise", accessibilityDescription: "Reload")
+            item.label = currentMode == .native ? "New" : "Reload"
+            item.image = NSImage(systemSymbolName: currentMode == .native ? "square.and.pencil" : "arrow.clockwise",
+                                 accessibilityDescription: item.label)
             item.action = #selector(doReload)
             item.target = self
             return item
@@ -190,6 +234,12 @@ extension WebViewController: NSToolbarDelegate {
     }
 
     func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
+        if currentMode == .native {
+            return [
+                .flexibleSpace,
+                NSToolbarItem.Identifier("Reload"),
+            ]
+        }
         return [
             NSToolbarItem.Identifier("BackForward"),
             .flexibleSpace,
@@ -215,6 +265,8 @@ extension WebViewController: NSToolbarDelegate {
     }
 
     @objc private func goHome() {
-        webView.load(URLRequest(url: homeURL))
+        if currentMode == .web {
+            webView.load(URLRequest(url: homeURL))
+        }
     }
 }

@@ -12,6 +12,10 @@ mkdir -p "$APP_BUNDLE/Contents/Resources"
 swiftc \
   Sources/main.swift \
   Sources/DockManager.swift \
+  Sources/Preferences.swift \
+  Sources/KeychainStore.swift \
+  Sources/ScrtLinkAPI.swift \
+  Sources/NativeSecretFormView.swift \
   Sources/StatusBarController.swift \
   Sources/WebViewController.swift \
   Sources/PreferencesWindow.swift \
@@ -20,6 +24,7 @@ swiftc \
   -framework AppKit \
   -framework WebKit \
   -framework ServiceManagement \
+  -framework Security \
   -target arm64-apple-macosx14.0 \
   -swift-version 6
 
@@ -27,6 +32,7 @@ cp Resources/Info.plist "$APP_BUNDLE/Contents/"
 cp Resources/AppIcon.icns "$APP_BUNDLE/Contents/Resources/" 2>/dev/null || true
 cp Resources/StatusBarIcon.png "$APP_BUNDLE/Contents/Resources/" 2>/dev/null || true
 cp Resources/StatusBarIcon@2x.png "$APP_BUNDLE/Contents/Resources/" 2>/dev/null || true
+cp Resources/harness.html "$APP_BUNDLE/Contents/Resources/"
 
 xattr -cr "$APP_BUNDLE" 2>/dev/null || true
 

@@ -7,6 +7,8 @@ class PreferencesWindow {
     private weak var webViewController: WebViewController?
     private var dockCheckbox: NSButton!
     private var loginCheckbox: NSButton!
+    private var useWebUICheckbox: NSButton!
+    private var apiTokenField: NSSecureTextField!
 
     init(webViewController: WebViewController) {
         self.webViewController = webViewController
@@ -15,7 +17,7 @@ class PreferencesWindow {
 
     private func setupWindow() {
         window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 420, height: 320),
+            contentRect: NSRect(x: 0, y: 0, width: 460, height: 460),
             styleMask: [.titled, .closable],
             backing: .buffered,
             defer: false
@@ -27,65 +29,118 @@ class PreferencesWindow {
         let contentView = NSView(frame: window.contentView!.bounds)
         contentView.autoresizingMask = [.width, .height]
 
-        var y = 270
+        var y = 410
 
-        // ========== GENERAL SECTION ==========
+        // ========== GENERAL ==========
         let generalTitle = NSTextField(labelWithString: "General")
         generalTitle.font = NSFont.boldSystemFont(ofSize: 13)
-        generalTitle.frame = NSRect(x: 20, y: y, width: 380, height: 20)
+        generalTitle.frame = NSRect(x: 20, y: y, width: 420, height: 20)
         contentView.addSubview(generalTitle)
         y -= 28
 
         loginCheckbox = NSButton(checkboxWithTitle: "Launch at Login", target: self, action: #selector(loginToggleChanged))
         loginCheckbox.state = isLaunchAtLoginEnabled() ? .on : .off
-        loginCheckbox.frame = NSRect(x: 20, y: y, width: 380, height: 24)
+        loginCheckbox.frame = NSRect(x: 20, y: y, width: 420, height: 24)
         contentView.addSubview(loginCheckbox)
         y -= 22
 
         let loginDescription = NSTextField(labelWithString: "Automatically start Scrt.link when you log in.")
         loginDescription.font = NSFont.systemFont(ofSize: 11)
         loginDescription.textColor = .secondaryLabelColor
-        loginDescription.frame = NSRect(x: 20, y: y, width: 380, height: 18)
+        loginDescription.frame = NSRect(x: 20, y: y, width: 420, height: 18)
         contentView.addSubview(loginDescription)
         y -= 26
 
         dockCheckbox = NSButton(checkboxWithTitle: "Show in Dock", target: self, action: #selector(dockToggleChanged))
         dockCheckbox.state = DockManager.isShowingInDock ? .on : .off
-        dockCheckbox.frame = NSRect(x: 20, y: y, width: 380, height: 24)
+        dockCheckbox.frame = NSRect(x: 20, y: y, width: 420, height: 24)
         contentView.addSubview(dockCheckbox)
         y -= 22
 
         let dockDescription = NSTextField(labelWithString: "When enabled, the app icon appears in the Dock.")
         dockDescription.font = NSFont.systemFont(ofSize: 11)
         dockDescription.textColor = .secondaryLabelColor
-        dockDescription.frame = NSRect(x: 20, y: y, width: 380, height: 18)
+        dockDescription.frame = NSRect(x: 20, y: y, width: 420, height: 18)
         contentView.addSubview(dockDescription)
         y -= 30
 
         let sep1 = NSBox()
         sep1.boxType = .separator
-        sep1.frame = NSRect(x: 20, y: y, width: 380, height: 1)
+        sep1.frame = NSRect(x: 20, y: y, width: 420, height: 1)
         contentView.addSubview(sep1)
-        y -= 24
+        y -= 20
 
-        // ========== DATA SECTION ==========
+        // ========== API ==========
+        let apiTitle = NSTextField(labelWithString: "API")
+        apiTitle.font = NSFont.boldSystemFont(ofSize: 13)
+        apiTitle.frame = NSRect(x: 20, y: y, width: 420, height: 20)
+        contentView.addSubview(apiTitle)
+        y -= 26
+
+        let apiDesc = NSTextField(labelWithString: "Required for the native form. Generate a bearer token from\nyour scrt.link account. Stored in macOS Keychain.")
+        apiDesc.font = NSFont.systemFont(ofSize: 11)
+        apiDesc.textColor = .secondaryLabelColor
+        apiDesc.maximumNumberOfLines = 2
+        apiDesc.frame = NSRect(x: 20, y: y - 4, width: 420, height: 30)
+        contentView.addSubview(apiDesc)
+        y -= 36
+
+        let tokenLabel = NSTextField(labelWithString: "Token:")
+        tokenLabel.font = NSFont.systemFont(ofSize: 12)
+        tokenLabel.frame = NSRect(x: 20, y: y + 2, width: 60, height: 18)
+        contentView.addSubview(tokenLabel)
+
+        apiTokenField = NSSecureTextField()
+        apiTokenField.placeholderString = "Bearer token"
+        apiTokenField.stringValue = KeychainStore.apiToken
+        apiTokenField.frame = NSRect(x: 85, y: y, width: 270, height: 24)
+        contentView.addSubview(apiTokenField)
+
+        let saveTokenButton = NSButton(title: "Save", target: self, action: #selector(saveToken))
+        saveTokenButton.bezelStyle = .rounded
+        saveTokenButton.frame = NSRect(x: 362, y: y - 2, width: 70, height: 28)
+        contentView.addSubview(saveTokenButton)
+        y -= 34
+
+        useWebUICheckbox = NSButton(checkboxWithTitle: "Use Web UI instead of native form",
+                                    target: self, action: #selector(useWebUIToggleChanged))
+        useWebUICheckbox.state = Preferences.useWebUI ? .on : .off
+        useWebUICheckbox.frame = NSRect(x: 20, y: y, width: 420, height: 24)
+        contentView.addSubview(useWebUICheckbox)
+        y -= 22
+
+        let webUIDescription = NSTextField(labelWithString: "When enabled, shows scrt.link embedded in a WebView instead\nof the native form. Useful for file secrets (not supported by API).")
+        webUIDescription.font = NSFont.systemFont(ofSize: 11)
+        webUIDescription.textColor = .secondaryLabelColor
+        webUIDescription.maximumNumberOfLines = 2
+        webUIDescription.frame = NSRect(x: 20, y: y - 4, width: 420, height: 30)
+        contentView.addSubview(webUIDescription)
+        y -= 30
+
+        let sep2 = NSBox()
+        sep2.boxType = .separator
+        sep2.frame = NSRect(x: 20, y: y, width: 420, height: 1)
+        contentView.addSubview(sep2)
+        y -= 20
+
+        // ========== DATA ==========
         let clearButton = NSButton(title: "Clear Website Data", target: self, action: #selector(clearData))
         clearButton.bezelStyle = .rounded
         clearButton.frame = NSRect(x: 20, y: y, width: 160, height: 28)
         contentView.addSubview(clearButton)
         y -= 22
 
-        let clearDescription = NSTextField(labelWithString: "Clears cookies and cache. You will need to log in again.")
+        let clearDescription = NSTextField(labelWithString: "Clears cookies and cache for the embedded web view.")
         clearDescription.font = NSFont.systemFont(ofSize: 11)
         clearDescription.textColor = .secondaryLabelColor
-        clearDescription.frame = NSRect(x: 20, y: y, width: 380, height: 18)
+        clearDescription.frame = NSRect(x: 20, y: y, width: 420, height: 18)
         contentView.addSubview(clearDescription)
 
         let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0.0"
         let versionLabel = NSTextField(labelWithString: "Scrt.link v\(version)")
         versionLabel.font = NSFont.systemFont(ofSize: 11)
         versionLabel.textColor = .tertiaryLabelColor
-        versionLabel.frame = NSRect(x: 20, y: 12, width: 380, height: 18)
+        versionLabel.frame = NSRect(x: 20, y: 12, width: 420, height: 18)
         contentView.addSubview(versionLabel)
 
         window.contentView = contentView
@@ -94,6 +149,8 @@ class PreferencesWindow {
     func showWindow() {
         dockCheckbox.state = DockManager.isShowingInDock ? .on : .off
         loginCheckbox.state = isLaunchAtLoginEnabled() ? .on : .off
+        useWebUICheckbox.state = Preferences.useWebUI ? .on : .off
+        apiTokenField.stringValue = KeychainStore.apiToken
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
     }
@@ -129,12 +186,35 @@ class PreferencesWindow {
         DockManager.setDockVisibility(show: show)
     }
 
+    // MARK: - Use Web UI
+
+    @objc private func useWebUIToggleChanged() {
+        Preferences.useWebUI = useWebUICheckbox.state == .on
+        webViewController?.refreshMode()
+    }
+
+    // MARK: - API token
+
+    @objc private func saveToken() {
+        let token = apiTokenField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        KeychainStore.apiToken = token
+
+        let alert = NSAlert()
+        alert.messageText = token.isEmpty ? "Token Cleared" : "Token Saved"
+        alert.informativeText = token.isEmpty
+            ? "The API token has been removed from Keychain."
+            : "The API token has been saved to macOS Keychain."
+        alert.alertStyle = .informational
+        alert.addButton(withTitle: "OK")
+        alert.runModal()
+    }
+
     // MARK: - Clear Data
 
     @objc private func clearData() {
         let alert = NSAlert()
         alert.messageText = "Clear Website Data?"
-        alert.informativeText = "This will clear all cookies and cached data. You will need to log back in to Scrt.link."
+        alert.informativeText = "This clears cookies and cached data used by the embedded web view. The API token in Keychain is not affected."
         alert.addButton(withTitle: "Clear")
         alert.addButton(withTitle: "Cancel")
         alert.alertStyle = .warning

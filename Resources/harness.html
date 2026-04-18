@@ -1,0 +1,34 @@
+<!doctype html>
+<html>
+<head><meta charset="utf-8"></head>
+<body>
+<script type="module">
+import scrtLink from 'https://scrt.link/api/v1/client-module';
+
+window.scrtCreate = async (apiKey, text, opts) => {
+    try {
+        const client = scrtLink(apiKey);
+        const r = await client.createSecret(text, opts || {});
+        if (r && r.secretLink) {
+            webkit.messageHandlers.scrtResult.postMessage({
+                ok: true,
+                link: r.secretLink,
+                receiptId: r.receiptId || '',
+                expiresAt: r.expiresAt || '',
+            });
+        } else {
+            const msg = (r && (r.message || r.error)) || JSON.stringify(r);
+            webkit.messageHandlers.scrtResult.postMessage({ ok: false, error: String(msg) });
+        }
+    } catch (e) {
+        webkit.messageHandlers.scrtResult.postMessage({
+            ok: false,
+            error: String(e && e.message ? e.message : e),
+        });
+    }
+};
+
+webkit.messageHandlers.scrtReady.postMessage({ ready: true });
+</script>
+</body>
+</html>
