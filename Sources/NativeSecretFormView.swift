@@ -3,7 +3,6 @@ import AppKit
 @MainActor
 final class NativeSecretFormView: NSView {
 
-    // Supported API secret types (file + snap are web-UI only)
     private struct TypeOption { let label: String; let value: String }
     private let types: [TypeOption] = [
         TypeOption(label: "Text",                 value: "text"),
@@ -11,7 +10,6 @@ final class NativeSecretFormView: NSView {
         TypeOption(label: "Neogram (auto-burn)",  value: "neogram"),
     ]
 
-    // TTL options match the scrt.link web UI
     private struct ExpOption { let label: String; let ms: Int }
     private let expirations: [ExpOption] = [
         ExpOption(label: "10 minutes", ms: 10 * 60 * 1000),
@@ -21,184 +19,168 @@ final class NativeSecretFormView: NSView {
         ExpOption(label: "30 days",    ms: 30 * 24 * 60 * 60 * 1000),
     ]
 
+    private let card = ElevatedCard()
     private let typePopup = NSPopUpButton()
     private let expPopup = NSPopUpButton()
     private let textView = NSTextView()
     private let textScroll = NSScrollView()
     private let passwordField = NSSecureTextField()
-    private let notePopupField = NSTextField()
+    private let noteField = NSTextField()
     private let createButton = NSButton()
     private let spinner = NSProgressIndicator()
     private let statusLabel = NSTextField(labelWithString: "")
-    private let resultBox = NSStackView()
-    private let resultField = NSTextField()
-    private let copyButton = NSButton()
-    private let openButton = NSButton()
+    private let resultCard = ResultCardView()
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
+        wantsLayer = true
+        layerContentsRedrawPolicy = .onSetNeedsDisplay
         setup()
     }
 
     required init?(coder: NSCoder) { fatalError() }
 
-    // MARK: - Setup
+    override func updateLayer() {
+        super.updateLayer()
+        layer?.backgroundColor = BrandStyle.surface.cgColor
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        needsDisplay = true
+    }
 
     private func setup() {
-        autoresizingMask = [.width, .height]
-        wantsLayer = true
+        autoresizingMask = [.width]
+
+        // Elevated white card holds all form content
+        card.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(card)
+        NSLayoutConstraint.activate([
+            card.topAnchor.constraint(equalTo: topAnchor, constant: 28),
+            card.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 28),
+            card.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -28),
+            card.bottomAnchor.constraint(lessThanOrEqualTo: bottomAnchor, constant: -28),
+        ])
 
         let root = NSStackView()
         root.orientation = .vertical
         root.alignment = .leading
-        root.spacing = 12
-        root.edgeInsets = NSEdgeInsets(top: 20, left: 24, bottom: 20, right: 24)
+        root.spacing = 16
+        root.edgeInsets = NSEdgeInsets(top: 32, left: 36, bottom: 32, right: 36)
         root.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(root)
+        card.addSubview(root)
         NSLayoutConstraint.activate([
-            root.topAnchor.constraint(equalTo: topAnchor),
-            root.leadingAnchor.constraint(equalTo: leadingAnchor),
-            root.trailingAnchor.constraint(equalTo: trailingAnchor),
-            root.bottomAnchor.constraint(equalTo: bottomAnchor),
+            root.topAnchor.constraint(equalTo: card.topAnchor),
+            root.leadingAnchor.constraint(equalTo: card.leadingAnchor),
+            root.trailingAnchor.constraint(equalTo: card.trailingAnchor),
+            root.bottomAnchor.constraint(equalTo: card.bottomAnchor),
         ])
 
-        // Title
+        // Display-size title
         let title = NSTextField(labelWithString: "New Secret")
-        title.font = .systemFont(ofSize: 18, weight: .semibold)
+        title.font = .systemFont(ofSize: 26, weight: .bold)
         root.addArrangedSubview(title)
 
-        let subtitle = NSTextField(labelWithString: "Encrypted on your device, viewable only once.")
-        subtitle.font = .systemFont(ofSize: 11)
+        let subtitle = NSTextField(labelWithString: "Encrypted on your device. Viewable only once.")
+        subtitle.font = .systemFont(ofSize: 12.5)
         subtitle.textColor = .secondaryLabelColor
         root.addArrangedSubview(subtitle)
 
-        // Type row
-        root.addArrangedSubview(labeledRow(
-            label: "Type",
-            control: typePopup,
-            width: 240
-        ))
+        root.setCustomSpacing(22, after: subtitle)
+
+        root.addArrangedSubview(sectionLabel("TYPE"))
         typePopup.addItems(withTitles: types.map { $0.label })
+        typePopup.translatesAutoresizingMaskIntoConstraints = false
+        typePopup.widthAnchor.constraint(equalToConstant: 260).isActive = true
+        root.addArrangedSubview(typePopup)
 
-        // Text body
-        let textLabel = NSTextField(labelWithString: "Secret")
-        textLabel.font = .systemFont(ofSize: 12, weight: .medium)
-        root.addArrangedSubview(textLabel)
-
+        root.addArrangedSubview(sectionLabel("SECRET"))
         textScroll.hasVerticalScroller = true
-        textScroll.borderType = .bezelBorder
+        textScroll.scrollerStyle = .overlay
+        textScroll.autohidesScrollers = true
+        textScroll.borderType = .lineBorder
+        textScroll.wantsLayer = true
+        textScroll.layer?.cornerRadius = 8
         textScroll.translatesAutoresizingMaskIntoConstraints = false
-        textScroll.heightAnchor.constraint(equalToConstant: 200).isActive = true
-        textScroll.widthAnchor.constraint(greaterThanOrEqualToConstant: 560).isActive = true
+        textScroll.heightAnchor.constraint(equalToConstant: 180).isActive = true
+        textScroll.setContentHuggingPriority(.defaultLow, for: .horizontal)
 
         textView.isRichText = false
         textView.isAutomaticQuoteSubstitutionEnabled = false
         textView.isAutomaticDashSubstitutionEnabled = false
         textView.isAutomaticTextReplacementEnabled = false
-        textView.font = .monospacedSystemFont(ofSize: 12, weight: .regular)
+        textView.font = .monospacedSystemFont(ofSize: 12.5, weight: .regular)
         textView.autoresizingMask = [.width]
         textView.minSize = .zero
         textView.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude,
                                   height: CGFloat.greatestFiniteMagnitude)
         textView.isVerticallyResizable = true
         textView.isHorizontallyResizable = false
+        textView.textContainerInset = NSSize(width: 4, height: 8)
         textScroll.documentView = textView
         root.addArrangedSubview(textScroll)
+        textScroll.widthAnchor.constraint(equalTo: root.widthAnchor, constant: -72).isActive = true
 
-        // Expiration row
-        root.addArrangedSubview(labeledRow(
-            label: "Expires in",
-            control: expPopup,
-            width: 180
-        ))
+        root.addArrangedSubview(sectionLabel("EXPIRES IN"))
         expPopup.addItems(withTitles: expirations.map { $0.label })
-        expPopup.selectItem(at: 2) // 24 hours default
+        expPopup.selectItem(at: 2)
+        expPopup.translatesAutoresizingMaskIntoConstraints = false
+        expPopup.widthAnchor.constraint(equalToConstant: 200).isActive = true
+        root.addArrangedSubview(expPopup)
 
-        // Password (optional)
+        root.addArrangedSubview(sectionLabel("OPTIONS"))
+
         passwordField.placeholderString = "Optional password"
-        root.addArrangedSubview(labeledRow(
-            label: "Password",
-            control: passwordField,
-            width: 300
-        ))
+        passwordField.translatesAutoresizingMaskIntoConstraints = false
+        passwordField.widthAnchor.constraint(equalToConstant: 320).isActive = true
+        root.addArrangedSubview(passwordField)
 
-        // Public note (optional)
-        notePopupField.placeholderString = "Optional note shown before opening"
-        root.addArrangedSubview(labeledRow(
-            label: "Public note",
-            control: notePopupField,
-            width: 420
-        ))
+        noteField.placeholderString = "Optional public note — also used as the history label"
+        noteField.translatesAutoresizingMaskIntoConstraints = false
+        root.addArrangedSubview(noteField)
+        noteField.widthAnchor.constraint(equalTo: root.widthAnchor, constant: -72).isActive = true
 
-        // Create button + spinner + status
-        let actionRow = NSStackView()
-        actionRow.orientation = .horizontal
-        actionRow.spacing = 10
-        actionRow.alignment = .centerY
+        root.setCustomSpacing(22, after: noteField)
 
         createButton.title = "Create Secret"
-        createButton.bezelStyle = .rounded
         createButton.keyEquivalent = "\r"
         createButton.target = self
         createButton.action = #selector(createTapped)
+        BrandStyle.applyPrimary(createButton)
 
         spinner.style = .spinning
         spinner.controlSize = .small
         spinner.isHidden = true
 
-        statusLabel.font = .systemFont(ofSize: 11)
+        statusLabel.font = .systemFont(ofSize: 11.5)
         statusLabel.textColor = .secondaryLabelColor
 
-        actionRow.addArrangedSubview(createButton)
-        actionRow.addArrangedSubview(spinner)
-        actionRow.addArrangedSubview(statusLabel)
+        let actionRow = NSStackView(views: [createButton, spinner, statusLabel])
+        actionRow.orientation = .horizontal
+        actionRow.spacing = 12
+        actionRow.alignment = .centerY
         root.addArrangedSubview(actionRow)
 
-        // Result row (hidden until we have a link)
-        resultBox.orientation = .horizontal
-        resultBox.spacing = 8
-        resultBox.alignment = .centerY
-        resultBox.isHidden = true
-
-        resultField.isEditable = false
-        resultField.isSelectable = true
-        resultField.bezelStyle = .squareBezel
-        resultField.font = .monospacedSystemFont(ofSize: 12, weight: .regular)
-        resultField.widthAnchor.constraint(greaterThanOrEqualToConstant: 420).isActive = true
-
-        copyButton.title = "Copy"
-        copyButton.bezelStyle = .rounded
-        copyButton.target = self
-        copyButton.action = #selector(copyTapped)
-
-        openButton.title = "Open"
-        openButton.bezelStyle = .rounded
-        openButton.target = self
-        openButton.action = #selector(openTapped)
-
-        resultBox.addArrangedSubview(resultField)
-        resultBox.addArrangedSubview(copyButton)
-        resultBox.addArrangedSubview(openButton)
-        root.addArrangedSubview(resultBox)
+        resultCard.isHidden = true
+        resultCard.onCopy = { [weak self] link in
+            self?.copyToClipboard(link)
+            self?.flashStatus("Copied.", isError: false)
+        }
+        resultCard.onOpen = { link in
+            if let url = URL(string: link) { NSWorkspace.shared.open(url) }
+        }
+        resultCard.translatesAutoresizingMaskIntoConstraints = false
+        root.addArrangedSubview(resultCard)
+        resultCard.widthAnchor.constraint(equalTo: root.widthAnchor, constant: -72).isActive = true
     }
 
-    private func labeledRow(label: String, control: NSView, width: CGFloat) -> NSView {
-        let row = NSStackView()
-        row.orientation = .horizontal
-        row.spacing = 10
-        row.alignment = .centerY
-        let lbl = NSTextField(labelWithString: label)
-        lbl.font = .systemFont(ofSize: 12, weight: .medium)
-        lbl.alignment = .right
-        lbl.widthAnchor.constraint(equalToConstant: 90).isActive = true
-        row.addArrangedSubview(lbl)
-        row.addArrangedSubview(control)
-        control.translatesAutoresizingMaskIntoConstraints = false
-        control.widthAnchor.constraint(equalToConstant: width).isActive = true
-        return row
+    private func sectionLabel(_ s: String) -> NSTextField {
+        let l = NSTextField(labelWithString: s)
+        l.font = .systemFont(ofSize: 10.5, weight: .semibold)
+        l.textColor = .tertiaryLabelColor
+        return l
     }
-
-    // MARK: - Actions
 
     @objc private func createTapped() {
         let rawText = textView.string.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -210,12 +192,12 @@ final class NativeSecretFormView: NSView {
         let type = types[typePopup.indexOfSelectedItem].value
         let expMs = expirations[expPopup.indexOfSelectedItem].ms
         let password = passwordField.stringValue
-        let note = notePopupField.stringValue
+        let note = noteField.stringValue
 
         setBusy(true)
         statusLabel.stringValue = "Encrypting and uploading…"
         statusLabel.textColor = .secondaryLabelColor
-        resultBox.isHidden = true
+        resultCard.isHidden = true
 
         ScrtLinkAPI.shared.createSecret(
             text: rawText,
@@ -228,38 +210,29 @@ final class NativeSecretFormView: NSView {
             self.setBusy(false)
             switch result {
             case .success(let r):
-                self.showResult(link: r.secretLink)
-                self.statusLabel.stringValue = "Secret created. Link copied to clipboard."
+                self.resultCard.show(link: r.secretLink)
+                self.statusLabel.stringValue = "Link copied to clipboard"
                 self.statusLabel.textColor = .secondaryLabelColor
+                self.copyToClipboard(r.secretLink)
+                let entry = SecretEntry(
+                    expiresAt: Self.parseDate(r.expiresAt),
+                    link: r.secretLink,
+                    receiptId: r.receiptId,
+                    secretType: type,
+                    publicNote: note.isEmpty ? nil : note
+                )
+                SecretHistoryStore.add(entry)
+                self.clearInputFields()
             case .failure(let err):
                 self.flashStatus(err.localizedDescription, isError: true)
             }
         }
     }
 
-    @objc private func copyTapped() {
-        copyToClipboard(resultField.stringValue)
-        flashStatus("Copied.", isError: false)
-    }
-
-    @objc private func openTapped() {
-        if let url = URL(string: resultField.stringValue) {
-            NSWorkspace.shared.open(url)
-        }
-    }
-
-    // MARK: - Helpers
-
     private func setBusy(_ busy: Bool) {
         createButton.isEnabled = !busy
         spinner.isHidden = !busy
         if busy { spinner.startAnimation(nil) } else { spinner.stopAnimation(nil) }
-    }
-
-    private func showResult(link: String) {
-        resultField.stringValue = link
-        resultBox.isHidden = false
-        copyToClipboard(link)
     }
 
     private func copyToClipboard(_ s: String) {
@@ -273,14 +246,170 @@ final class NativeSecretFormView: NSView {
         statusLabel.textColor = isError ? .systemRed : .secondaryLabelColor
     }
 
-    /// Called by the window controller after the user clears the form so the
-    /// view is ready for another secret.
-    func reset() {
+    private func clearInputFields() {
         textView.string = ""
         passwordField.stringValue = ""
-        notePopupField.stringValue = ""
-        resultBox.isHidden = true
-        resultField.stringValue = ""
+        noteField.stringValue = ""
+    }
+
+    func reset() {
+        clearInputFields()
+        resultCard.isHidden = true
         statusLabel.stringValue = ""
     }
+
+    private static let iso8601: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return f
+    }()
+
+    private static func parseDate(_ s: String) -> Date? {
+        if s.isEmpty { return nil }
+        if let d = iso8601.date(from: s) { return d }
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime]
+        return f.date(from: s)
+    }
+}
+
+// MARK: - Elevated card (the white surface with a subtle drop shadow)
+
+@MainActor
+final class ElevatedCard: NSView {
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        wantsLayer = true
+        layerContentsRedrawPolicy = .onSetNeedsDisplay
+        // Don't clip the shadow to view bounds
+        layer?.masksToBounds = false
+    }
+    required init?(coder: NSCoder) { fatalError() }
+
+    override func updateLayer() {
+        super.updateLayer()
+        layer?.cornerRadius = 14
+        layer?.backgroundColor = BrandStyle.elevatedSurface.cgColor
+        // No border — just a whisper of shadow for depth
+        layer?.borderWidth = 0
+        layer?.shadowColor = NSColor.black.cgColor
+        layer?.shadowOpacity = 0.05
+        layer?.shadowOffset = CGSize(width: 0, height: -2)
+        layer?.shadowRadius = 8
+        layer?.masksToBounds = false
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        needsDisplay = true
+    }
+}
+
+// MARK: - Result card
+
+@MainActor
+private final class ResultCardView: NSView {
+    var onCopy: ((String) -> Void)?
+    var onOpen: ((String) -> Void)?
+
+    private let checkmark = NSImageView()
+    private let heading = NSTextField(labelWithString: "Secret created")
+    private let linkField = NSTextField()
+    private let copyButton = NSButton()
+    private let openButton = NSButton()
+
+    private var currentLink: String = ""
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        wantsLayer = true
+        layerContentsRedrawPolicy = .onSetNeedsDisplay
+        setup()
+    }
+    required init?(coder: NSCoder) { fatalError() }
+
+    override func updateLayer() {
+        super.updateLayer()
+        layer?.cornerRadius = 10
+        // Subtle pink-tinted success background
+        layer?.backgroundColor = BrandStyle.accent.withAlphaComponent(0.08).cgColor
+        layer?.borderColor = BrandStyle.accent.withAlphaComponent(0.22).cgColor
+        layer?.borderWidth = 0.5
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        needsDisplay = true
+    }
+
+    private func setup() {
+        checkmark.image = NSImage(systemSymbolName: "checkmark.circle.fill",
+                                  accessibilityDescription: "Success")
+        checkmark.contentTintColor = BrandStyle.accent
+        checkmark.imageScaling = .scaleProportionallyUpOrDown
+        checkmark.translatesAutoresizingMaskIntoConstraints = false
+
+        heading.font = .systemFont(ofSize: 13, weight: .semibold)
+
+        let topRow = NSStackView(views: [checkmark, heading])
+        topRow.orientation = .horizontal
+        topRow.spacing = 8
+        topRow.alignment = .centerY
+        topRow.translatesAutoresizingMaskIntoConstraints = false
+
+        linkField.isEditable = false
+        linkField.isSelectable = true
+        linkField.isBordered = false
+        linkField.drawsBackground = false
+        linkField.font = .monospacedSystemFont(ofSize: 12, weight: .regular)
+        linkField.lineBreakMode = .byTruncatingMiddle
+        linkField.maximumNumberOfLines = 1
+        linkField.translatesAutoresizingMaskIntoConstraints = false
+
+        copyButton.title = "Copy"
+        BrandStyle.applyPrimary(copyButton)
+        copyButton.target = self
+        copyButton.action = #selector(copyTapped)
+        copyButton.translatesAutoresizingMaskIntoConstraints = false
+
+        openButton.title = "Open"
+        BrandStyle.applySecondary(openButton)
+        openButton.target = self
+        openButton.action = #selector(openTapped)
+        openButton.translatesAutoresizingMaskIntoConstraints = false
+
+        let buttons = NSStackView(views: [copyButton, openButton])
+        buttons.orientation = .horizontal
+        buttons.spacing = 8
+        buttons.translatesAutoresizingMaskIntoConstraints = false
+
+        addSubview(topRow)
+        addSubview(linkField)
+        addSubview(buttons)
+
+        NSLayoutConstraint.activate([
+            checkmark.widthAnchor.constraint(equalToConstant: 18),
+            checkmark.heightAnchor.constraint(equalToConstant: 18),
+
+            topRow.topAnchor.constraint(equalTo: topAnchor, constant: 14),
+            topRow.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 16),
+
+            linkField.topAnchor.constraint(equalTo: topRow.bottomAnchor, constant: 10),
+            linkField.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 16),
+            linkField.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -16),
+
+            buttons.topAnchor.constraint(equalTo: linkField.bottomAnchor, constant: 12),
+            buttons.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 16),
+            buttons.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -14),
+        ])
+    }
+
+    func show(link: String) {
+        currentLink = link
+        linkField.stringValue = link
+        isHidden = false
+    }
+
+    @objc private func copyTapped() { onCopy?(currentLink) }
+    @objc private func openTapped() { onOpen?(currentLink) }
 }

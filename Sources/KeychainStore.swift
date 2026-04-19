@@ -19,6 +19,13 @@ enum KeychainStore {
             } else {
                 UserDefaults.standard.set(newValue, forKey: key)
             }
+            NotificationCenter.default.post(name: .apiTokenChanged, object: nil)
         }
     }
+
+    static var hasToken: Bool { !apiToken.isEmpty }
+}
+
+extension Notification.Name {
+    static let apiTokenChanged = Notification.Name("scrtLinkApiTokenChanged")
 }

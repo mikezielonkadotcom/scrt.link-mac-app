@@ -140,8 +140,21 @@ class PreferencesWindow {
         let versionLabel = NSTextField(labelWithString: "Scrt.link v\(version)")
         versionLabel.font = NSFont.systemFont(ofSize: 11)
         versionLabel.textColor = .tertiaryLabelColor
-        versionLabel.frame = NSRect(x: 20, y: 12, width: 420, height: 18)
+        versionLabel.frame = NSRect(x: 20, y: 28, width: 420, height: 18)
         contentView.addSubview(versionLabel)
+
+        let authorButton = NSButton(title: "Built by Mike Zielonka", target: self, action: #selector(openAuthorSite))
+        authorButton.bezelStyle = .accessoryBarAction
+        authorButton.isBordered = false
+        authorButton.attributedTitle = NSAttributedString(
+            string: "Built by Mike Zielonka · mikezielonka.com",
+            attributes: [
+                .font: NSFont.systemFont(ofSize: 11),
+                .foregroundColor: NSColor.tertiaryLabelColor,
+            ]
+        )
+        authorButton.frame = NSRect(x: 20, y: 10, width: 420, height: 16)
+        contentView.addSubview(authorButton)
 
         window.contentView = contentView
     }
@@ -207,6 +220,14 @@ class PreferencesWindow {
         alert.alertStyle = .informational
         alert.addButton(withTitle: "OK")
         alert.runModal()
+    }
+
+    // MARK: - Author site
+
+    @objc private func openAuthorSite() {
+        if let url = URL(string: "https://mikezielonka.com") {
+            NSWorkspace.shared.open(url)
+        }
     }
 
     // MARK: - Clear Data

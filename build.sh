@@ -14,6 +14,9 @@ swiftc \
   Sources/DockManager.swift \
   Sources/Preferences.swift \
   Sources/KeychainStore.swift \
+  Sources/BrandStyle.swift \
+  Sources/SecretHistoryStore.swift \
+  Sources/HistorySidebarView.swift \
   Sources/ScrtLinkAPI.swift \
   Sources/NativeSecretFormView.swift \
   Sources/StatusBarController.swift \

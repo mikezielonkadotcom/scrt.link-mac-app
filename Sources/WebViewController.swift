@@ -6,6 +6,8 @@ class WebViewController: NSObject, WKNavigationDelegate, WKUIDelegate {
     private var window: NSWindow!
     private var webView: WKWebView!
     private var nativeForm: NativeSecretFormView?
+    private var nativeContainer: NSView?  // split view with sidebar + form
+    private var historySidebar: HistorySidebarView?
     private let homeURL = URL(string: "https://scrt.link/")!
     private var hasLoadedWeb = false
     private var currentMode: Mode = .native
@@ -30,7 +32,7 @@ class WebViewController: NSObject, WKNavigationDelegate, WKUIDelegate {
     }
 
     private func setupWindow() {
-        let windowSize = NSSize(width: 900, height: 720)
+        let windowSize = NSSize(width: 1060, height: 720)
 
         window = NSWindow(
             contentRect: NSRect(origin: .zero, size: windowSize),
@@ -40,13 +42,61 @@ class WebViewController: NSObject, WKNavigationDelegate, WKUIDelegate {
         )
 
         window.title = "Scrt.link"
-        window.minSize = NSSize(width: 600, height: 500)
+        window.minSize = NSSize(width: 780, height: 520)
         window.isReleasedWhenClosed = false
         window.setFrameAutosaveName("ScrtLinkMain")
         window.center()
 
         setupToolbar()
         applyMode()
+    }
+
+    private func makeNativeContainer() -> NSView {
+        let form = NativeSecretFormView(frame: .zero)
+        let sidebar = HistorySidebarView(frame: .zero)
+        self.nativeForm = form
+        self.historySidebar = sidebar
+
+        let split = NSSplitView()
+        split.isVertical = true
+        split.dividerStyle = .thin
+        split.translatesAutoresizingMaskIntoConstraints = false
+
+        // Sidebar wrapped in a scroll-safe container for consistent sizing
+        sidebar.translatesAutoresizingMaskIntoConstraints = false
+        let sidebarHolder = NSView()
+        sidebarHolder.addSubview(sidebar)
+        NSLayoutConstraint.activate([
+            sidebar.topAnchor.constraint(equalTo: sidebarHolder.topAnchor),
+            sidebar.bottomAnchor.constraint(equalTo: sidebarHolder.bottomAnchor),
+            sidebar.leadingAnchor.constraint(equalTo: sidebarHolder.leadingAnchor),
+            sidebar.trailingAnchor.constraint(equalTo: sidebarHolder.trailingAnchor),
+        ])
+
+        let formScroll = NSScrollView()
+        formScroll.hasVerticalScroller = true
+        formScroll.scrollerStyle = .overlay
+        formScroll.autohidesScrollers = true
+        formScroll.drawsBackground = true
+        formScroll.backgroundColor = BrandStyle.surface
+        formScroll.documentView = form
+        // Stretch the form's width to match the clip view so the gray canvas
+        // fills the whole right pane, and the card inside can size properly.
+        form.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            form.widthAnchor.constraint(equalTo: formScroll.contentView.widthAnchor),
+            form.topAnchor.constraint(equalTo: formScroll.contentView.topAnchor),
+            form.leadingAnchor.constraint(equalTo: formScroll.contentView.leadingAnchor),
+        ])
+
+        split.addArrangedSubview(sidebarHolder)
+        split.addArrangedSubview(formScroll)
+        split.setHoldingPriority(.defaultLow + 1, forSubviewAt: 0)
+
+        // Initial sizing: sidebar ~280, form fills
+        DispatchQueue.main.async { split.setPosition(280, ofDividerAt: 0) }
+
+        return split
     }
 
     private func setupToolbar() {
@@ -63,10 +113,10 @@ class WebViewController: NSObject, WKNavigationDelegate, WKUIDelegate {
         let desired: Mode = Preferences.useWebUI ? .web : .native
         switch desired {
         case .native:
-            if nativeForm == nil {
-                nativeForm = NativeSecretFormView(frame: window.contentView?.bounds ?? .zero)
+            if nativeContainer == nil {
+                nativeContainer = makeNativeContainer()
             }
-            window.contentView = nativeForm
+            window.contentView = nativeContainer
             window.title = "Scrt.link"
         case .web:
             if !hasLoadedWeb {
@@ -99,8 +149,20 @@ class WebViewController: NSObject, WKNavigationDelegate, WKUIDelegate {
 
     func showWindow() {
         applyMode()
+        ensureWindowOnScreen()
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
+    }
+
+    /// Recenter if the saved frame landed off-screen (e.g. monitor was
+    /// disconnected since the last save).
+    private func ensureWindowOnScreen() {
+        guard let screens = NSScreen.screens as [NSScreen]? else { return }
+        let frame = window.frame
+        let intersectsAScreen = screens.contains { $0.visibleFrame.intersects(frame) }
+        if !intersectsAScreen {
+            window.center()
+        }
     }
 
     func toggleWindow() {
@@ -126,6 +188,7 @@ class WebViewController: NSObject, WKNavigationDelegate, WKUIDelegate {
         switch currentMode {
         case .native:
             nativeForm?.reset()
+            historySidebar?.reload()
         case .web:
             webView.reload()
         }
