@@ -162,12 +162,14 @@ fi
 
 step "Launch"
 
-# Make sure nothing is already running
+# Make sure nothing is already running. Slightly longer settle so System
+# Events refreshes its process list — without this, running smoke
+# back-to-back with another test can have the probe see stale state.
 pkill -f "$BUNDLE_PATH/Contents/MacOS/$APP_NAME" 2>/dev/null || true
-sleep 1
+sleep 3
 
 open "$BUNDLE_PATH"
-sleep 3
+sleep 4
 
 PID=$(pgrep -f "$BUNDLE_PATH/Contents/MacOS/$APP_NAME" || true)
 if [ -n "$PID" ]; then
@@ -189,8 +191,11 @@ fi
 
 step "UI probe (requires Accessibility permission)"
 
-# Is the app the frontmost / visible via System Events?
-UI_RESULT=$(osascript 2>/dev/null <<'APPLESCRIPT' || echo "ERROR"
+# Is the app the frontmost / visible via System Events? Retry a few times —
+# System Events sometimes lags right after a launch.
+UI_RESULT=""
+for attempt in 1 2 3 4; do
+    UI_RESULT=$(osascript 2>/dev/null <<'APPLESCRIPT' || echo "ERROR"
 tell application "System Events"
     if exists (processes where bundle identifier is "com.mikezielonka.scrt-link") then
         tell process "ScrtLink"
@@ -204,6 +209,11 @@ tell application "System Events"
 end tell
 APPLESCRIPT
 )
+    case "$UI_RESULT" in
+        ERROR|NO_PROCESS|0\|*) sleep 2 ;;
+        *) break ;;
+    esac
+done
 
 if [ "$UI_RESULT" = "ERROR" ] || [ -z "$UI_RESULT" ]; then
     warn "AppleScript probe failed — likely missing Accessibility permission for this shell"
