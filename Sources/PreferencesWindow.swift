@@ -9,6 +9,7 @@ class PreferencesWindow {
     private var loginCheckbox: NSButton!
     private var useWebUICheckbox: NSButton!
     private var apiTokenField: NSSecureTextField!
+    private var customHostField: NSTextField!
 
     init(webViewController: WebViewController) {
         self.webViewController = webViewController
@@ -17,7 +18,7 @@ class PreferencesWindow {
 
     private func setupWindow() {
         window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 460, height: 460),
+            contentRect: NSRect(x: 0, y: 0, width: 460, height: 540),
             styleMask: [.titled, .closable],
             backing: .buffered,
             defer: false
@@ -29,7 +30,7 @@ class PreferencesWindow {
         let contentView = NSView(frame: window.contentView!.bounds)
         contentView.autoresizingMask = [.width, .height]
 
-        var y = 410
+        var y = 490
 
         // ========== GENERAL ==========
         let generalTitle = NSTextField(labelWithString: "General")
@@ -115,6 +116,32 @@ class PreferencesWindow {
         webUIDescription.maximumNumberOfLines = 2
         webUIDescription.frame = NSRect(x: 20, y: y - 4, width: 420, height: 30)
         contentView.addSubview(webUIDescription)
+        y -= 34
+
+        // Custom domain (white-label)
+        let hostLabel = NSTextField(labelWithString: "Domain:")
+        hostLabel.font = NSFont.systemFont(ofSize: 12)
+        hostLabel.frame = NSRect(x: 20, y: y + 2, width: 60, height: 18)
+        contentView.addSubview(hostLabel)
+
+        customHostField = NSTextField()
+        customHostField.placeholderString = "secrets.yourdomain.com (optional)"
+        customHostField.stringValue = Preferences.customHost
+        customHostField.frame = NSRect(x: 85, y: y, width: 270, height: 24)
+        contentView.addSubview(customHostField)
+
+        let saveHostButton = NSButton(title: "Save", target: self, action: #selector(saveCustomHost))
+        saveHostButton.bezelStyle = .rounded
+        saveHostButton.frame = NSRect(x: 362, y: y - 2, width: 70, height: 28)
+        contentView.addSubview(saveHostButton)
+        y -= 24
+
+        let hostDesc = NSTextField(labelWithString: "White-label domain for created links. Requires scrt.link's\nSecret Service tier with the domain configured on their side.")
+        hostDesc.font = NSFont.systemFont(ofSize: 11)
+        hostDesc.textColor = .secondaryLabelColor
+        hostDesc.maximumNumberOfLines = 2
+        hostDesc.frame = NSRect(x: 20, y: y - 4, width: 420, height: 30)
+        contentView.addSubview(hostDesc)
         y -= 30
 
         let sep2 = NSBox()
@@ -164,6 +191,7 @@ class PreferencesWindow {
         loginCheckbox.state = isLaunchAtLoginEnabled() ? .on : .off
         useWebUICheckbox.state = Preferences.useWebUI ? .on : .off
         apiTokenField.stringValue = KeychainStore.apiToken
+        customHostField.stringValue = Preferences.customHost
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
     }
@@ -217,6 +245,28 @@ class PreferencesWindow {
         alert.informativeText = token.isEmpty
             ? "The API token has been removed."
             : "The API token has been saved."
+        alert.alertStyle = .informational
+        alert.addButton(withTitle: "OK")
+        alert.runModal()
+    }
+
+    // MARK: - Custom host
+
+    @objc private func saveCustomHost() {
+        let host = customHostField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Basic sanitization — users might paste "https://..."; strip it.
+        let cleaned = host
+            .replacingOccurrences(of: "https://", with: "")
+            .replacingOccurrences(of: "http://", with: "")
+            .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        Preferences.customHost = cleaned
+        customHostField.stringValue = cleaned
+
+        let alert = NSAlert()
+        alert.messageText = cleaned.isEmpty ? "Custom Domain Cleared" : "Custom Domain Saved"
+        alert.informativeText = cleaned.isEmpty
+            ? "New secrets will use scrt.link."
+            : "New secrets will resolve to \(cleaned). Verify on scrt.link that this domain is configured for your account — otherwise the API call will fail."
         alert.alertStyle = .informational
         alert.addButton(withTitle: "OK")
         alert.runModal()

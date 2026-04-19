@@ -131,6 +131,11 @@ class ScrtLinkAPI: NSObject {
         ]
         if let p = password, !p.isEmpty { opts["password"] = p }
         if let n = publicNote, !n.isEmpty { opts["publicNote"] = n }
+        // White-label host (Secret Service tier). When set, scrt.link's
+        // client module POSTs to https://<host>/api/v1/secrets and returns
+        // a link on that host.
+        let customHost = Preferences.customHost
+        if !customHost.isEmpty { opts["host"] = customHost }
 
         let optsJSON = jsonString(from: opts) ?? "{}"
         let textLit = jsLiteral(from: text)
