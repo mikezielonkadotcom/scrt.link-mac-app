@@ -10,6 +10,7 @@ class PreferencesWindow {
     private var useWebUICheckbox: NSButton!
     private var apiTokenField: NSSecureTextField!
     private var customHostField: NSTextField!
+    private var shortcutRecorder: ShortcutRecorderView!
 
     init(webViewController: WebViewController) {
         self.webViewController = webViewController
@@ -18,7 +19,7 @@ class PreferencesWindow {
 
     private func setupWindow() {
         window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 460, height: 540),
+            contentRect: NSRect(x: 0, y: 0, width: 460, height: 640),
             styleMask: [.titled, .closable],
             backing: .buffered,
             defer: false
@@ -30,7 +31,7 @@ class PreferencesWindow {
         let contentView = NSView(frame: window.contentView!.bounds)
         contentView.autoresizingMask = [.width, .height]
 
-        var y = 490
+        var y = 590
 
         // ========== GENERAL ==========
         let generalTitle = NSTextField(labelWithString: "General")
@@ -69,6 +70,37 @@ class PreferencesWindow {
         sep1.boxType = .separator
         sep1.frame = NSRect(x: 20, y: y, width: 420, height: 1)
         contentView.addSubview(sep1)
+        y -= 20
+
+        // ========== KEYBOARD SHORTCUT ==========
+        let shortcutTitle = NSTextField(labelWithString: "Global Hotkey")
+        shortcutTitle.font = NSFont.boldSystemFont(ofSize: 13)
+        shortcutTitle.frame = NSRect(x: 20, y: y, width: 420, height: 20)
+        contentView.addSubview(shortcutTitle)
+        y -= 28
+
+        shortcutRecorder = ShortcutRecorderView()
+        shortcutRecorder.shortcut = Preferences.shortcut
+        shortcutRecorder.onChange = { newValue in
+            Preferences.shortcut = newValue
+        }
+        shortcutRecorder.translatesAutoresizingMaskIntoConstraints = false
+        shortcutRecorder.frame = NSRect(x: 20, y: y - 4, width: 420, height: 28)
+        contentView.addSubview(shortcutRecorder)
+        y -= 34
+
+        let shortcutDesc = NSTextField(labelWithString: "Press the shortcut to open a new secret from anywhere with\nthe clipboard prefilled. Default: ⇧⌘S. Disable or reset above.")
+        shortcutDesc.font = NSFont.systemFont(ofSize: 11)
+        shortcutDesc.textColor = .secondaryLabelColor
+        shortcutDesc.maximumNumberOfLines = 2
+        shortcutDesc.frame = NSRect(x: 20, y: y - 4, width: 420, height: 30)
+        contentView.addSubview(shortcutDesc)
+        y -= 30
+
+        let sepShortcut = NSBox()
+        sepShortcut.boxType = .separator
+        sepShortcut.frame = NSRect(x: 20, y: y, width: 420, height: 1)
+        contentView.addSubview(sepShortcut)
         y -= 20
 
         // ========== API ==========
@@ -192,6 +224,7 @@ class PreferencesWindow {
         useWebUICheckbox.state = Preferences.useWebUI ? .on : .off
         apiTokenField.stringValue = KeychainStore.apiToken
         customHostField.stringValue = Preferences.customHost
+        shortcutRecorder.shortcut = Preferences.shortcut
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
     }

@@ -54,6 +54,7 @@ required_sources=(
     "Sources/HistorySidebarView.swift"
     "Sources/GlobalHotKey.swift"
     "Sources/ServiceProvider.swift"
+    "Sources/ShortcutRecorderView.swift"
     "Sources/ScrtLinkAPI.swift"
     "Sources/NativeSecretFormView.swift"
     "Resources/Info.plist"

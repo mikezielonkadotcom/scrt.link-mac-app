@@ -20,15 +20,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         globalWebViewController?.showWindow()
 
-        // Register global hotkey ⇧⌘S — opens the compose window with
-        // the current clipboard text prefilled (or empty if no text).
-        globalHotKey = GlobalHotKey(
-            keyCode: UInt32(kVK_ANSI_S),
-            modifiers: UInt32(cmdKey | shiftKey)
-        ) {
-            let clip = NSPasteboard.general.string(forType: .string) ?? ""
-            globalWebViewController?.showAndCompose(prefill: clip)
-        }
+        // Global hotkey — default ⇧⌘S, user-customisable in Preferences.
+        registerGlobalHotKey()
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(onShortcutChanged),
+            name: .shortcutChanged, object: nil
+        )
 
         // Register Services menu provider and refresh the Services cache so
         // "Create Scrt.link Secret" appears on selected text in other apps.
@@ -122,6 +119,32 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc func reloadPage() {
         globalWebViewController?.reload()
+    }
+
+    // MARK: - Global hotkey management
+
+    @objc func onShortcutChanged() {
+        registerGlobalHotKey()
+    }
+
+    func registerGlobalHotKey() {
+        // Releasing the previous reference triggers deinit, which
+        // unregisters the old hotkey with the OS.
+        globalHotKey = nil
+
+        guard let spec = Preferences.shortcut else {
+            return  // explicitly disabled
+        }
+        globalHotKey = GlobalHotKey(
+            keyCode: spec.keyCode,
+            modifiers: spec.carbonModifiers
+        ) {
+            let clip = NSPasteboard.general.string(forType: .string) ?? ""
+            globalWebViewController?.showAndCompose(prefill: clip)
+        }
+        if globalHotKey == nil {
+            NSLog("ScrtLink: could not register hotkey \(spec.displayString) — likely a conflict with another app.")
+        }
     }
 
     @objc func runDiagnostic() {
