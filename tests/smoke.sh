@@ -52,6 +52,8 @@ required_sources=(
     "Sources/BrandStyle.swift"
     "Sources/SecretHistoryStore.swift"
     "Sources/HistorySidebarView.swift"
+    "Sources/GlobalHotKey.swift"
+    "Sources/ServiceProvider.swift"
     "Sources/ScrtLinkAPI.swift"
     "Sources/NativeSecretFormView.swift"
     "Resources/Info.plist"
@@ -89,6 +91,21 @@ if [ "$plist_exec" = "$APP_NAME" ]; then
     pass "CFBundleExecutable = $APP_NAME"
 else
     fail "CFBundleExecutable is '$plist_exec', expected '$APP_NAME'"
+fi
+
+# Verify the Services menu entry is declared
+services_message=$(plutil -extract NSServices.0.NSMessage raw Resources/Info.plist 2>/dev/null || echo "")
+if [ "$services_message" = "createScrtLinkSecret" ]; then
+    pass "NSServices entry declared (message=createScrtLinkSecret)"
+else
+    fail "NSServices NSMessage is '$services_message', expected 'createScrtLinkSecret'"
+fi
+
+services_name=$(plutil -extract NSServices.0.NSMenuItem.default raw Resources/Info.plist 2>/dev/null || echo "")
+if [ "$services_name" = "Create Scrt.link Secret" ]; then
+    pass "Services menu label = '$services_name'"
+else
+    fail "Services menu label wrong: '$services_name'"
 fi
 
 # ---- 3. build -----------------------------------------------------------

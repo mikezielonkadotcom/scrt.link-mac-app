@@ -1,8 +1,11 @@
 import AppKit
+import Carbon.HIToolbox
 import WebKit
 
 var globalStatusBarController: StatusBarController?
 var globalWebViewController: WebViewController?
+var globalServiceProvider: ServiceProvider?
+var globalHotKey: GlobalHotKey?
 
 @MainActor
 class AppDelegate: NSObject, NSApplicationDelegate {
@@ -16,6 +19,23 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         DockManager.apply()
 
         globalWebViewController?.showWindow()
+
+        // Register global hotkey ⇧⌘S — opens the compose window with
+        // the current clipboard text prefilled (or empty if no text).
+        globalHotKey = GlobalHotKey(
+            keyCode: UInt32(kVK_ANSI_S),
+            modifiers: UInt32(cmdKey | shiftKey)
+        ) {
+            let clip = NSPasteboard.general.string(forType: .string) ?? ""
+            globalWebViewController?.showAndCompose(prefill: clip)
+        }
+
+        // Register Services menu provider and refresh the Services cache so
+        // "Create Scrt.link Secret" appears on selected text in other apps.
+        let svc = ServiceProvider()
+        NSApp.servicesProvider = svc
+        globalServiceProvider = svc
+        NSUpdateDynamicServices()
 
         DispatchQueue.main.asyncAfter(deadline: .now() + 3) { @MainActor in
             UpdateManager.shared.checkForUpdatesInBackground()

@@ -17,6 +17,8 @@ swiftc \
   Sources/BrandStyle.swift \
   Sources/SecretHistoryStore.swift \
   Sources/HistorySidebarView.swift \
+  Sources/GlobalHotKey.swift \
+  Sources/ServiceProvider.swift \
   Sources/ScrtLinkAPI.swift \
   Sources/NativeSecretFormView.swift \
   Sources/StatusBarController.swift \
@@ -28,6 +30,7 @@ swiftc \
   -framework WebKit \
   -framework ServiceManagement \
   -framework Security \
+  -framework Carbon \
   -target arm64-apple-macosx14.0 \
   -swift-version 6
 

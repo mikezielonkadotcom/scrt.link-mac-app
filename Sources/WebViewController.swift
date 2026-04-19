@@ -165,6 +165,21 @@ class WebViewController: NSObject, WKNavigationDelegate, WKUIDelegate {
         }
     }
 
+    /// Show the window (forcing native form mode) and prefill the secret
+    /// text area with the given string. Called by the global hotkey and
+    /// the Services menu integration.
+    func showAndCompose(prefill: String) {
+        // Force-switch to native form for compose — Web UI can't be prefilled.
+        if Preferences.useWebUI {
+            Preferences.useWebUI = false
+        }
+        applyMode()
+        ensureWindowOnScreen()
+        window.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+        nativeForm?.prefill(prefill)
+    }
+
     func toggleWindow() {
         if window.isVisible && window.isKeyWindow {
             window.orderOut(nil)

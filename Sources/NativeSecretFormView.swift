@@ -258,6 +258,18 @@ final class NativeSecretFormView: NSView {
         statusLabel.stringValue = ""
     }
 
+    /// Fill the secret text area and focus it. Used by the global hotkey
+    /// and Services menu to open in a ready-to-send state.
+    func prefill(_ text: String) {
+        if !text.isEmpty {
+            textView.string = text
+            // Select the prefilled text so the user can immediately re-type
+            // to replace it, or Cmd+A+Delete to clear.
+            textView.setSelectedRange(NSRange(location: 0, length: (text as NSString).length))
+        }
+        window?.makeFirstResponder(textView)
+    }
+
     private static let iso8601: ISO8601DateFormatter = {
         let f = ISO8601DateFormatter()
         f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]

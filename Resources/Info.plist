@@ -28,5 +28,24 @@
 	<string></string>
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
+	<key>NSServices</key>
+	<array>
+		<dict>
+			<key>NSMenuItem</key>
+			<dict>
+				<key>default</key>
+				<string>Create Scrt.link Secret</string>
+			</dict>
+			<key>NSMessage</key>
+			<string>createScrtLinkSecret</string>
+			<key>NSPortName</key>
+			<string>ScrtLink</string>
+			<key>NSSendTypes</key>
+			<array>
+				<string>public.utf8-plain-text</string>
+				<string>public.text</string>
+			</array>
+		</dict>
+	</array>
 </dict>
 </plist>
