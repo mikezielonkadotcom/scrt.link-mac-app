@@ -2,33 +2,68 @@
 <html>
 <head><meta charset="utf-8"></head>
 <body>
-<script type="module">
-import scrtLink from 'https://scrt.link/api/v1/client-module';
-
-window.scrtCreate = async (apiKey, text, opts) => {
+<script>
+function reportError(prefix, err) {
     try {
-        const client = scrtLink(apiKey);
-        const r = await client.createSecret(text, opts || {});
-        if (r && r.secretLink) {
-            webkit.messageHandlers.scrtResult.postMessage({
-                ok: true,
-                link: r.secretLink,
-                receiptId: r.receiptId || '',
-                expiresAt: r.expiresAt || '',
-            });
-        } else {
-            const msg = (r && (r.message || r.error)) || JSON.stringify(r);
-            webkit.messageHandlers.scrtResult.postMessage({ ok: false, error: String(msg) });
-        }
-    } catch (e) {
+        const msg = (err && (err.message || err.reason)) || err || 'unknown';
         webkit.messageHandlers.scrtResult.postMessage({
             ok: false,
-            error: String(e && e.message ? e.message : e),
+            error: prefix + ': ' + String(msg),
         });
-    }
-};
+    } catch (_) {}
+}
+function log(msg) {
+    try { webkit.messageHandlers.scrtLog.postMessage({ msg: String(msg) }); } catch (_) {}
+}
+window.addEventListener('error', (e) => reportError('window.onerror', e.error || e.message));
+window.addEventListener('unhandledrejection', (e) => reportError('unhandledrejection', e.reason));
+try {
+    webkit.messageHandlers.scrtReady.postMessage({ stage: 'document-loaded' });
+} catch (_) {}
+</script>
+<script type="module">
+try {
+    log('importing client module');
+    const mod = await import('https://scrt.link/api/v1/client-module');
+    const scrtLink = mod.default;
+    log('client module imported');
 
-webkit.messageHandlers.scrtReady.postMessage({ ready: true });
+    window.scrtCreate = async (apiKey, text, opts) => {
+        try {
+            log('scrtCreate begin: text.len=' + text.length + ', opts=' + JSON.stringify(opts) + ', tokenPrefix=' + (apiKey || '').substring(0, 8));
+            const client = scrtLink(apiKey);
+            log('client instance created');
+            log('awaiting client.createSecret...');
+            const r = await client.createSecret(text, opts || {});
+            log('client.createSecret resolved: ' + (typeof r) + ' ' + JSON.stringify(r).substring(0, 300));
+            if (r && r.secretLink) {
+                webkit.messageHandlers.scrtResult.postMessage({
+                    ok: true,
+                    link: r.secretLink,
+                    receiptId: r.receiptId || '',
+                    expiresAt: r.expiresAt || '',
+                });
+            } else {
+                const msg = (r && (r.message || r.error)) || JSON.stringify(r);
+                webkit.messageHandlers.scrtResult.postMessage({ ok: false, error: 'api: ' + String(msg) });
+            }
+        } catch (e) {
+            log('scrtCreate threw: ' + String(e));
+            webkit.messageHandlers.scrtResult.postMessage({
+                ok: false,
+                error: 'createSecret: ' + String(e && e.message ? e.message : e),
+            });
+        }
+    };
+
+    webkit.messageHandlers.scrtReady.postMessage({ stage: 'module-loaded', ready: true });
+} catch (err) {
+    log('module import failed: ' + String(err));
+    webkit.messageHandlers.scrtResult.postMessage({
+        ok: false,
+        error: 'module import failed: ' + String(err && err.message ? err.message : err),
+    });
+}
 </script>
 </body>
 </html>

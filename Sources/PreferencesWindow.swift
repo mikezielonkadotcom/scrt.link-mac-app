@@ -77,7 +77,7 @@ class PreferencesWindow {
         contentView.addSubview(apiTitle)
         y -= 26
 
-        let apiDesc = NSTextField(labelWithString: "Required for the native form. Generate a bearer token from\nyour scrt.link account. Stored in macOS Keychain.")
+        let apiDesc = NSTextField(labelWithString: "Required for the native form. Generate a bearer token from\nyour scrt.link account.")
         apiDesc.font = NSFont.systemFont(ofSize: 11)
         apiDesc.textColor = .secondaryLabelColor
         apiDesc.maximumNumberOfLines = 2
@@ -202,8 +202,8 @@ class PreferencesWindow {
         let alert = NSAlert()
         alert.messageText = token.isEmpty ? "Token Cleared" : "Token Saved"
         alert.informativeText = token.isEmpty
-            ? "The API token has been removed from Keychain."
-            : "The API token has been saved to macOS Keychain."
+            ? "The API token has been removed."
+            : "The API token has been saved."
         alert.alertStyle = .informational
         alert.addButton(withTitle: "OK")
         alert.runModal()
@@ -214,7 +214,7 @@ class PreferencesWindow {
     @objc private func clearData() {
         let alert = NSAlert()
         alert.messageText = "Clear Website Data?"
-        alert.informativeText = "This clears cookies and cached data used by the embedded web view. The API token in Keychain is not affected."
+        alert.informativeText = "This clears cookies and cached data used by the embedded web view. Your API token is not affected."
         alert.addButton(withTitle: "Clear")
         alert.addButton(withTitle: "Cancel")
         alert.alertStyle = .warning

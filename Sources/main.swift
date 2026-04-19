@@ -72,6 +72,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let viewMenu = NSMenu(title: "View")
         viewMenu.addItem(withTitle: "Reload", action: #selector(reloadPage), keyEquivalent: "r")
         viewMenu.addItem(withTitle: "Open Scrt.link", action: #selector(openDashboard), keyEquivalent: "o")
+        viewMenu.addItem(NSMenuItem.separator())
+        viewMenu.addItem(withTitle: "Run API Diagnostic", action: #selector(runDiagnostic), keyEquivalent: "d")
         viewMenuItem.submenu = viewMenu
         mainMenu.addItem(viewMenuItem)
 
@@ -100,6 +102,21 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc func reloadPage() {
         globalWebViewController?.reload()
+    }
+
+    @objc func runDiagnostic() {
+        ScrtLinkAPI.shared.runDiagnostic { report in
+            let alert = NSAlert()
+            alert.messageText = "API Diagnostic"
+            alert.informativeText = report
+            alert.addButton(withTitle: "Copy")
+            alert.addButton(withTitle: "OK")
+            if alert.runModal() == .alertFirstButtonReturn {
+                let pb = NSPasteboard.general
+                pb.clearContents()
+                pb.setString(report, forType: .string)
+            }
+        }
     }
 }
 

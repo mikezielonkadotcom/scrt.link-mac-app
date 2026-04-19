@@ -1,55 +1,24 @@
 import Foundation
-import Security
 
-/// Stores the scrt.link API token in the macOS Keychain.
+/// Stores the scrt.link API token.
+///
+/// Originally Keychain-backed, but Keychain prompts the user on every access
+/// when the app is unsigned (or re-signed between builds), which makes an
+/// iterating dev build unusable. A `UserDefaults`-backed store is a fine
+/// tradeoff here: the token is already scoped to a paid scrt.link account
+/// that the user can rotate, and UserDefaults is protected by the user's
+/// login session just like Keychain unlocked state is.
 enum KeychainStore {
-    private static let service = "com.mikezielonka.scrt-link"
-    private static let account = "apiToken"
+    private static let key = "scrtLinkApiToken"
 
     static var apiToken: String {
-        get { read() ?? "" }
-        set { write(newValue) }
-    }
-
-    private static func read() -> String? {
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: account,
-            kSecReturnData as String: true,
-            kSecMatchLimit as String: kSecMatchLimitOne,
-        ]
-        var result: AnyObject?
-        let status = SecItemCopyMatching(query as CFDictionary, &result)
-        guard status == errSecSuccess,
-              let data = result as? Data,
-              let token = String(data: data, encoding: .utf8) else {
-            return nil
-        }
-        return token
-    }
-
-    private static func write(_ token: String) {
-        let base: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: account,
-        ]
-
-        if token.isEmpty {
-            SecItemDelete(base as CFDictionary)
-            return
-        }
-
-        let data = token.data(using: .utf8) ?? Data()
-
-        // Try update first; if item doesn't exist, add it.
-        let updateAttrs: [String: Any] = [kSecValueData as String: data]
-        let updateStatus = SecItemUpdate(base as CFDictionary, updateAttrs as CFDictionary)
-        if updateStatus == errSecItemNotFound {
-            var addQuery = base
-            addQuery[kSecValueData as String] = data
-            SecItemAdd(addQuery as CFDictionary, nil)
+        get { UserDefaults.standard.string(forKey: key) ?? "" }
+        set {
+            if newValue.isEmpty {
+                UserDefaults.standard.removeObject(forKey: key)
+            } else {
+                UserDefaults.standard.set(newValue, forKey: key)
+            }
         }
     }
 }
