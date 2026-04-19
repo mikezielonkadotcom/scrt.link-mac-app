@@ -1,6 +1,37 @@
 #!/bin/bash
 set -e
 
+# @todo Sign and notarize the app before zipping.
+#
+# Currently we ship unsigned binaries — users see Gatekeeper warnings on
+# first launch and have to right-click → Open. When Mike's ready with his
+# Developer ID cert, plug in here between `./build.sh` and the `zip` step:
+#
+#   TEAM_ID="XXXXXXXXXX"
+#   APPLE_ID="me@mikezielonka.com"
+#   APP_PASSWORD="app-specific-password"   # appleid.apple.com
+#
+#   codesign --force --deep --timestamp \
+#       --options runtime \
+#       --sign "Developer ID Application: Mike Zielonka ($TEAM_ID)" \
+#       "$APP_BUNDLE"
+#
+#   # (zip happens here)
+#
+#   xcrun notarytool submit "$ZIP_FILE" \
+#       --apple-id "$APPLE_ID" \
+#       --team-id "$TEAM_ID" \
+#       --password "$APP_PASSWORD" \
+#       --wait
+#
+#   # Staple the ticket into the .app, then re-zip
+#   xcrun stapler staple "$APP_BUNDLE"
+#   (cd "$BUILD_DIR" && rm "$ZIP_NAME" && zip -r "$ZIP_NAME" "$APP.app")
+#
+# After this lands we can also move the scrt.link bearer token back to
+# Keychain (see Sources/KeychainStore.swift header comment) since
+# Keychain won't re-prompt when the binary is stably signed.
+
 # Usage: ./release.sh <version> [GITHUB_TOKEN]
 
 if [ -z "$1" ]; then
