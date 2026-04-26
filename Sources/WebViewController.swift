@@ -2,7 +2,7 @@ import AppKit
 import WebKit
 
 @MainActor
-class WebViewController: NSObject, WKNavigationDelegate, WKUIDelegate {
+class WebViewController: NSObject, WKNavigationDelegate, WKUIDelegate, NSWindowDelegate {
     private var window: NSWindow!
     private var webView: WKWebView!
     private var nativeForm: NativeSecretFormView?
@@ -44,6 +44,7 @@ class WebViewController: NSObject, WKNavigationDelegate, WKUIDelegate {
         window.title = "Scrt.link"
         window.minSize = NSSize(width: 780, height: 520)
         window.isReleasedWhenClosed = false
+        window.delegate = self
         window.setFrameAutosaveName("ScrtLinkMain")
         window.center()
 
@@ -152,6 +153,9 @@ class WebViewController: NSObject, WKNavigationDelegate, WKUIDelegate {
         ensureWindowOnScreen()
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
+        // Restore the user's preferred Dock visibility — closing the window
+        // earlier would have demoted us to .accessory.
+        DockManager.applyActivationPolicy(show: DockManager.isShowingInDock)
     }
 
     /// Recenter if the saved frame landed off-screen (e.g. monitor was
@@ -178,6 +182,17 @@ class WebViewController: NSObject, WKNavigationDelegate, WKUIDelegate {
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
         nativeForm?.prefill(prefill)
+    }
+
+    // MARK: - NSWindowDelegate
+
+    func windowWillClose(_ notification: Notification) {
+        // App lives in the menu bar by default. Closing the main window
+        // demotes us to accessory mode so the Dock icon disappears; the
+        // status bar icon remains responsive. Reopening (via menu bar
+        // click, hotkey, services, etc.) restores Dock visibility per
+        // the user's preference.
+        DockManager.applyActivationPolicy(show: false)
     }
 
     func toggleWindow() {
