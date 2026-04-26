@@ -196,15 +196,15 @@ final class HistorySidebarView: NSView {
         clearButton.isHidden = false
 
         for entry in entries {
-            stack.addArrangedSubview(makeCard(for: entry))
+            let card = HistoryCardView(entry: entry)
+            card.translatesAutoresizingMaskIntoConstraints = false
+            stack.addArrangedSubview(card)
+            // Width constraint must come AFTER addArrangedSubview — otherwise
+            // the card and the stack have no common ancestor and AppKit raises
+            // an uncaught exception that takes down both the window and the
+            // status bar item with it.
+            card.widthAnchor.constraint(equalTo: stack.widthAnchor, constant: -20).isActive = true
         }
-    }
-
-    private func makeCard(for entry: SecretEntry) -> NSView {
-        let card = HistoryCardView(entry: entry)
-        card.translatesAutoresizingMaskIntoConstraints = false
-        card.widthAnchor.constraint(equalTo: stack.widthAnchor, constant: -20).isActive = true
-        return card
     }
 
     // MARK: - Actions
