@@ -36,14 +36,36 @@ final class HistorySidebarView: NSView {
         NotificationCenter.default.removeObserver(self)
     }
 
+    /// The main window is never released or emptied on close — it's just
+    /// ordered out — so "in a window" is not the same as "visible". Drive the
+    /// timer from the window's close/occlusion notifications instead, the
+    /// same way SecretLogWindow does, so a menu-bar-resident app isn't
+    /// rebuilding an invisible list once a minute for days.
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
-        if window != nil {
+        let nc = NotificationCenter.default
+        nc.removeObserver(self, name: NSWindow.willCloseNotification, object: nil)
+        nc.removeObserver(self, name: NSWindow.didChangeOcclusionStateNotification, object: nil)
+
+        guard let window else { stopRefreshTimer(); return }
+        nc.addObserver(self, selector: #selector(onWindowVisibilityChanged(_:)),
+                       name: NSWindow.willCloseNotification, object: window)
+        nc.addObserver(self, selector: #selector(onWindowVisibilityChanged(_:)),
+                       name: NSWindow.didChangeOcclusionStateNotification, object: window)
+        syncTimerToVisibility(closing: false)
+    }
+
+    @objc private func onWindowVisibilityChanged(_ note: Notification) {
+        syncTimerToVisibility(closing: note.name == NSWindow.willCloseNotification)
+    }
+
+    private func syncTimerToVisibility(closing: Bool) {
+        // willClose fires before occlusionState updates, so treat it as hidden.
+        if !closing, window?.occlusionState.contains(.visible) == true {
             startRefreshTimer()
-            reload()
+            reload()  // catch up on anything that aged out while hidden
         } else {
-            refreshTimer?.invalidate()
-            refreshTimer = nil
+            stopRefreshTimer()
         }
     }
 
@@ -55,6 +77,11 @@ final class HistorySidebarView: NSView {
         timer.tolerance = 5
         RunLoop.main.add(timer, forMode: .common)
         refreshTimer = timer
+    }
+
+    private func stopRefreshTimer() {
+        refreshTimer?.invalidate()
+        refreshTimer = nil
     }
 
     @objc private func onRefreshTick() { reload() }
@@ -147,7 +174,7 @@ final class HistorySidebarView: NSView {
         logButton.action = #selector(logTapped)
         logButton.toolTip = "Every link this app has created, not just the last 24 hours"
 
-        clearButton.title = "Clear"
+        clearButton.title = "Clear History"
         clearButton.bezelStyle = .rounded
         clearButton.controlSize = .small
         clearButton.target = self
@@ -238,23 +265,28 @@ final class HistorySidebarView: NSView {
 
     @objc private func onHistoryChanged() { reload() }
 
+    /// Re-renders the list. One decode of the store serves both the recent
+    /// filter and the "is there anything at all" check. When the set of
+    /// visible entries hasn't changed (the usual case for the minute timer)
+    /// only the relative timestamps are refreshed in place — no card churn
+    /// and, importantly, no scroll reset under the user's cursor.
     func reload() {
         let now = Date()
-        let entries = SecretHistoryStore.recent(now: now)
-        let hasAnyHistory = !SecretHistoryStore.load().isEmpty
-        stack.arrangedSubviews.forEach { $0.removeFromSuperview() }
+        let all = SecretHistoryStore.load()  // newest first
+        let cutoff = now.addingTimeInterval(-SecretHistoryStore.recentWindow)
+        let entries = all.filter { $0.createdAt > cutoff }
 
-        clearButton.isHidden = !hasAnyHistory
+        clearButton.isHidden = all.isEmpty
+        emptyLabel.isHidden = !entries.isEmpty
 
-        if entries.isEmpty {
-            emptyLabel.isHidden = false
+        let existing = stack.arrangedSubviews.compactMap { $0 as? HistoryCardView }
+        if existing.map(\.entry.id) == entries.map(\.id) {
+            existing.forEach { $0.refresh(now: now) }
             return
         }
-        emptyLabel.isHidden = true
 
-        // `recent` is already newest-first; keep it explicit so a future
-        // change to the store can't silently flip the sidebar.
-        for entry in SecretHistoryStore.sortedNewestFirst(entries) {
+        existing.forEach { $0.removeFromSuperview() }
+        for entry in entries {
             let card = HistoryCardView(entry: entry, now: now)
             card.translatesAutoresizingMaskIntoConstraints = false
             stack.addArrangedSubview(card)
@@ -265,7 +297,7 @@ final class HistorySidebarView: NSView {
             card.widthAnchor.constraint(equalTo: stack.widthAnchor, constant: -20).isActive = true
         }
 
-        // Newest card is at the top; make sure that's what's on screen.
+        // The list changed (new secret, or one aged out): show the newest.
         stack.layoutSubtreeIfNeeded()
         scrollView.contentView.scroll(to: .zero)
         scrollView.reflectScrolledClipView(scrollView.contentView)
@@ -351,8 +383,14 @@ private final class StatusDot: NSView {
 
 @MainActor
 private final class HistoryCardView: NSView {
-    private let entry: SecretEntry
-    private let now: Date
+    let entry: SecretEntry
+    private var now: Date
+    private let sub = NSTextField(labelWithString: "")
+    private static let relativeFormatter: RelativeDateTimeFormatter = {
+        let f = RelativeDateTimeFormatter()
+        f.unitsStyle = .short
+        return f
+    }()
 
     init(entry: SecretEntry, now: Date = Date()) {
         self.entry = entry
@@ -386,7 +424,7 @@ private final class HistoryCardView: NSView {
         title.maximumNumberOfLines = 1
         title.translatesAutoresizingMaskIntoConstraints = false
 
-        let sub = NSTextField(labelWithString: subtitleText())
+        sub.stringValue = subtitleText()
         sub.font = .systemFont(ofSize: 10.5)
         sub.textColor = .secondaryLabelColor
         sub.lineBreakMode = .byTruncatingTail
@@ -426,15 +464,21 @@ private final class HistoryCardView: NSView {
         heightAnchor.constraint(greaterThanOrEqualToConstant: 74).isActive = true
     }
 
+    /// Re-render the relative timestamps against a new "now" without
+    /// rebuilding the card.
+    func refresh(now: Date) {
+        self.now = now
+        sub.stringValue = subtitleText()
+    }
+
     private func labelText() -> String {
         entry.displayLabel
     }
 
     private func subtitleText() -> String {
-        let f = RelativeDateTimeFormatter()
-        f.unitsStyle = .short
+        let f = Self.relativeFormatter
         let ago = f.localizedString(for: entry.createdAt, relativeTo: now)
-        var parts = [entry.secretType.capitalized, ago]
+        var parts = [SecretEntry.typeName(entry.secretType), ago]
         if let exp = entry.expiresAt {
             if exp > now {
                 parts.append("expires " + f.localizedString(for: exp, relativeTo: now))

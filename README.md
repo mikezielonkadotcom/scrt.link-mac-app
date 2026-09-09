@@ -64,7 +64,7 @@ On success:
 - **Copy** re-copies the link to clipboard
 - **Open** opens the link in your default browser — **note: this consumes the secret's one-time view**
 - **View Full Log…** opens the Secret Log window
-- **Clear** wipes all local records, recent and full log (doesn't affect the secrets on scrt.link)
+- **Clear History** wipes all local records, recent and full log (doesn't affect the secrets on scrt.link)
 
 ### Secret Log window
 
@@ -72,7 +72,7 @@ Everything the app has ever logged (capped at the newest 500), newest first. Ope
 
 - Columns: Created · Label · Type · Expires · Receipt. The link itself is never displayed — it is a bearer credential — use **Copy Link** instead.
 - Filter box searches label, type, and receipt ID
-- **Copy Link** (`⌘C` or double-click), **Open**, **Delete** (or ⌫) act on the selected row(s); right-click for the same actions
+- **Copy Link** (`⌘C` or double-click), **Open**, **Delete** (or ⌫) act on the selected row(s); right-clicking a row acts on that row
 - **Clear Log…** wipes all local records after confirmation
 
 ### Web UI mode
@@ -171,7 +171,7 @@ See [tests/README.md](tests/README.md) for what each step covers.
 
 **Unsigned binary.** Releases are not code-signed or notarized. macOS Gatekeeper will warn before first launch; right-click → Open to bypass. If you're deploying this in an environment that requires notarization, build from source and sign it yourself.
 
-**No plaintext storage — but links are sensitive.** The app never stores the plaintext of your secrets. It does store the shareable links locally (in `UserDefaults` under `scrtLinkHistory`) along with metadata like type, expiration, and public note. **A scrt.link URL is effectively a bearer credential for that secret** — its `#<key>` fragment is the decryption key. Treat your history the same way you'd treat any credential list: clear it if the device is shared, compromised, or resold. "Clear" in the sidebar or "Clear Log…" in the Secret Log window wipes local records (it does not affect the secrets themselves on scrt.link).
+**No plaintext storage — but links are sensitive.** The app never stores the plaintext of your secrets. It does store the shareable links locally (in `UserDefaults` under `scrtLinkHistory`) along with metadata like type, expiration, and public note. **A scrt.link URL is effectively a bearer credential for that secret** — its `#<key>` fragment is the decryption key. Treat your history the same way you'd treat any credential list: clear it if the device is shared, compromised, or resold. "Clear History" in the sidebar or "Clear Log…" in the Secret Log window wipes local records (it does not affect the secrets themselves on scrt.link).
 
 **API token security.** Your scrt.link bearer token is stored in `UserDefaults` (not Keychain — Keychain prompts on every access for unsigned apps, which broke iteration). Treat it with the same care as any other account credential. If you suspect it's been exposed, regenerate it on scrt.link and update it in Preferences.
 

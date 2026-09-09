@@ -92,11 +92,16 @@ NSLayoutConstraint.activate([
 sidebar.reload()
 host.contentView!.layoutSubtreeIfNeeded()
 
+@MainActor
+func fail(_ message: String) -> Never {
+    print("  ✗ \(message)")
+    defaults.removePersistentDomain(forName: domain)
+    exit(1)
+}
+
 guard let scroll = allSubviews(of: sidebar).compactMap({ $0 as? NSScrollView }).first,
       let stack = scroll.documentView as? NSStackView
-else {
-    print("  ✗ could not find the sidebar's scroll view / stack"); exit(1)
-}
+else { fail("could not find the sidebar's scroll view / stack") }
 
 let clip = scroll.contentView
 check(clip.isFlipped, "clip view is flipped (list anchored to top)")
@@ -130,13 +135,38 @@ if let top = stack.arrangedSubviews.first {
     check(firstLabel(in: top) == "newest", "top card of the tall list is still the newest")
     check(yInClip(top) < 40, "top card is visible at the top of the viewport (y = \(yInClip(top)))")
 }
+
+// A reload with an unchanged entry set (what the minute timer does) must
+// keep the user's scroll position and reuse the existing cards.
+clip.scroll(to: NSPoint(x: 0, y: 300))
+scroll.reflectScrolledClipView(clip)
+let cardsBefore = stack.arrangedSubviews
+sidebar.reload()
+host.contentView!.layoutSubtreeIfNeeded()
+check(clip.bounds.origin.y == 300, "timer-style reload keeps scroll position (origin.y == \(clip.bounds.origin.y))")
+check(stack.arrangedSubviews.elementsEqual(cardsBefore, by: ===), "timer-style reload reuses the same card views")
+
+// …but a change to the list (a new secret) reveals the top again.
+seed("brand-new", ageHours: 0)
+host.contentView!.layoutSubtreeIfNeeded()
+check(clip.bounds.origin.y == 0, "new secret scrolls back to the top (origin.y == \(clip.bounds.origin.y))")
+check(firstLabel(in: stack.arrangedSubviews.first!) == "brand-new", "new secret is the top card")
+if let id = SecretHistoryStore.load().first(where: { $0.publicNote == "brand-new" })?.id {
+    SecretHistoryStore.remove(id: id)
+}
 if let ids = Optional(Set(SecretHistoryStore.load().filter { ($0.publicNote ?? "").hasPrefix("bulk-") }.map(\.id))) {
     SecretHistoryStore.remove(ids: ids)
 }
 
 let sidebarButtons = allSubviews(of: sidebar).compactMap { $0 as? NSButton }.map(\.title)
 check(sidebarButtons.contains("View Full Log…"), "sidebar has a View Full Log… button")
-check(sidebarButtons.contains("Clear"), "sidebar keeps a Clear button")
+check(sidebarButtons.contains("Clear History"), "sidebar keeps a Clear History button")
+
+// The card subtitle uses the same type names as the log window.
+if let top = cards.first {
+    let texts = allSubviews(of: top).compactMap { ($0 as? NSTextField)?.stringValue }
+    check(texts.contains { $0.hasPrefix("Text secret · ") }, "card subtitle uses SecretEntry.typeName: \(texts)")
+}
 
 // Rolling age-out: no history change, time passes → 20 h entry leaves the list
 // once it's older than 24 h. Simulate by rewriting createdAt and reloading,
@@ -156,9 +186,7 @@ print("▸ Secret Log window")
 let log = SecretLogWindow()
 guard let logWindow = app.windows.first(where: { $0.title == "Secret Log" }),
       let table = allSubviews(of: logWindow.contentView!).compactMap({ $0 as? NSTableView }).first
-else {
-    print("  ✗ could not find the Secret Log window / table"); exit(1)
-}
+else { fail("could not find the Secret Log window / table") }
 _ = log
 logWindow.contentView!.layoutSubtreeIfNeeded()
 

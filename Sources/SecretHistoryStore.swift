@@ -68,14 +68,6 @@ enum SecretHistoryStore {
         return load(defaults: defaults).filter { $0.createdAt > cutoff }
     }
 
-    /// When the oldest entry currently in the recent window will age out,
-    /// or nil if nothing is in the window. Lets the sidebar schedule a
-    /// refresh exactly when the list next changes.
-    static func nextRecentExpiry(now: Date = Date(), defaults: UserDefaults = .standard) -> Date? {
-        guard let oldest = recent(now: now, defaults: defaults).last else { return nil }
-        return oldest.createdAt.addingTimeInterval(recentWindow)
-    }
-
     static func sortedNewestFirst(_ entries: [SecretEntry]) -> [SecretEntry] {
         entries.sorted { $0.createdAt > $1.createdAt }
     }
@@ -90,8 +82,10 @@ enum SecretHistoryStore {
     @discardableResult
     static func add(_ entry: SecretEntry, defaults: UserDefaults = .standard) -> [SecretEntry] {
         var current = load(defaults: defaults)
+        // The new entry always goes first and always survives the cap, even
+        // if its timestamp is odd (clock stepped back, server-supplied date);
+        // load() sorts on read, so display order stays correct regardless.
         current.insert(entry, at: 0)
-        current = sortedNewestFirst(current)
         if current.count > maxEntries {
             current = Array(current.prefix(maxEntries))
         }

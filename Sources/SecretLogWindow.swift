@@ -134,12 +134,16 @@ final class SecretLogWindow: NSObject {
         // instead of the table growing past the window edge.
         table.autoresizingMask = [.width]
         table.target = self
-        table.doubleAction = #selector(copyTapped)
+        table.doubleAction = #selector(doubleClicked)
         table.onDeleteKey = { [weak self] in self?.deleteTapped() }
+        // Edit → Copy (⌘C) reaches the table through the responder chain, so
+        // the search field keeps ⌘C for its own text while it has focus.
+        table.onCopy = { [weak self] in self?.copyTapped() }
         table.menu = contextMenu()
 
         scrollView.documentView = table
         scrollView.hasVerticalScroller = true
+        scrollView.hasHorizontalScroller = true
         scrollView.autohidesScrollers = true
         scrollView.borderType = .noBorder
         scrollView.translatesAutoresizingMaskIntoConstraints = false
@@ -166,9 +170,7 @@ final class SecretLogWindow: NSObject {
             button.bezelStyle = .rounded
             button.controlSize = .regular
         }
-        copyButton.keyEquivalent = "c"
-        copyButton.keyEquivalentModifierMask = [.command]
-        copyButton.toolTip = "Copy the selected link(s) to the clipboard"
+        copyButton.toolTip = "Copy the selected link(s) to the clipboard (⌘C)"
         openButton.toolTip = "Open the selected link in your browser — this consumes the view"
         deleteButton.toolTip = "Remove the selected record(s) from this Mac. The secret on scrt.link is unaffected."
         clearButton.toolTip = "Delete every local record"
@@ -215,12 +217,16 @@ final class SecretLogWindow: NSObject {
         return box
     }
 
+    /// Context-menu items get their own selectors: a right-click does NOT
+    /// move the selection, so they must act on `clickedRow`, not on whatever
+    /// happened to be selected. The buttons and keyboard paths use the
+    /// selection.
     private func contextMenu() -> NSMenu {
         let menu = NSMenu()
-        menu.addItem(withTitle: "Copy Link", action: #selector(copyTapped), keyEquivalent: "").target = self
-        menu.addItem(withTitle: "Open in Browser", action: #selector(openTapped), keyEquivalent: "").target = self
+        menu.addItem(withTitle: "Copy Link", action: #selector(contextCopy), keyEquivalent: "").target = self
+        menu.addItem(withTitle: "Open in Browser", action: #selector(contextOpen), keyEquivalent: "").target = self
         menu.addItem(NSMenuItem.separator())
-        menu.addItem(withTitle: "Delete", action: #selector(deleteTapped), keyEquivalent: "").target = self
+        menu.addItem(withTitle: "Delete", action: #selector(contextDelete), keyEquivalent: "").target = self
         return menu
     }
 
@@ -296,6 +302,18 @@ final class SecretLogWindow: NSObject {
         table.selectedRowIndexes.compactMap { $0 < rows.count ? rows[$0] : nil }
     }
 
+    /// Rows a click-driven action should target: the clicked row when it is
+    /// outside the selection, otherwise the whole selection (right-clicking
+    /// one of several selected rows acts on all of them, like Finder).
+    /// `clickedRow` is only meaningful during a click-dispatched action.
+    private func clickedEntries() -> [SecretEntry] {
+        let clicked = table.clickedRow
+        if clicked >= 0, clicked < rows.count, !table.selectedRowIndexes.contains(clicked) {
+            return [rows[clicked]]
+        }
+        return selectedEntries()
+    }
+
     private func updateSelectionButtons() {
         let count = table.selectedRowIndexes.count
         copyButton.isEnabled = count >= 1
@@ -305,21 +323,35 @@ final class SecretLogWindow: NSObject {
 
     // MARK: - Actions
 
-    @objc private func copyTapped() {
-        let links = selectedEntries().map(\.link)
+    @objc private func copyTapped() { copy(selectedEntries()) }
+    @objc private func openTapped() { open(selectedEntries()) }
+    @objc private func deleteTapped() { delete(selectedEntries()) }
+
+    @objc private func contextCopy() { copy(clickedEntries()) }
+    @objc private func contextOpen() { open(clickedEntries()) }
+    @objc private func contextDelete() { delete(clickedEntries()) }
+
+    @objc private func doubleClicked() {
+        // Double-clicking the empty area below the rows is not a copy request.
+        guard table.clickedRow >= 0 else { return }
+        copy(clickedEntries())
+    }
+
+    private func copy(_ entries: [SecretEntry]) {
+        let links = entries.map(\.link)
         guard !links.isEmpty else { return }
         let pb = NSPasteboard.general
         pb.clearContents()
         pb.setString(links.joined(separator: "\n"), forType: .string)
     }
 
-    @objc private func openTapped() {
-        guard let entry = selectedEntries().first, let url = URL(string: entry.link) else { return }
+    private func open(_ entries: [SecretEntry]) {
+        guard let entry = entries.first, let url = URL(string: entry.link) else { return }
         NSWorkspace.shared.open(url)
     }
 
-    @objc private func deleteTapped() {
-        let ids = selectedEntries().map(\.id)
+    private func delete(_ entries: [SecretEntry]) {
+        let ids = entries.map(\.id)
         guard !ids.isEmpty else { return }
         SecretHistoryStore.remove(ids: Set(ids))
     }
@@ -417,11 +449,25 @@ extension SecretLogWindow: NSSearchFieldDelegate {
     }
 }
 
-// MARK: - Table view with Delete-key support
+// MARK: - Table view with Delete-key and Edit → Copy support
 
 @MainActor
-private final class LogTableView: NSTableView {
+private final class LogTableView: NSTableView, NSMenuItemValidation {
     var onDeleteKey: (() -> Void)?
+    var onCopy: (() -> Void)?
+
+    /// Responder-chain target for Edit → Copy (⌘C) while the table is first
+    /// responder. Selector `copy:`, distinct from NSObject.copy().
+    @objc func copy(_ sender: Any?) {
+        onCopy?()
+    }
+
+    func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
+        if menuItem.action == #selector(copy(_:)) {
+            return !selectedRowIndexes.isEmpty
+        }
+        return true
+    }
 
     override func keyDown(with event: NSEvent) {
         // 51 = Backspace, 117 = Forward Delete

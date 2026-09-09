@@ -18,9 +18,20 @@ func check(_ condition: Bool, _ message: String, file: String = #file, line: Int
     }
 }
 
-let suiteName = "com.mikezielonka.scrt-link.tests.\(UUID().uuidString)"
+// Fixed suite name, wiped at start (survives any exit path or crash) and
+// again in finish(). A per-run UUID would leave a new plist behind every run,
+// because exit() skips top-level defer.
+let suiteName = "com.mikezielonka.scrt-link.tests"
 let defaults = UserDefaults(suiteName: suiteName)!
-defer { defaults.removePersistentDomain(forName: suiteName) }
+defaults.removePersistentDomain(forName: suiteName)
+
+@MainActor
+func finish() -> Never {
+    defaults.removePersistentDomain(forName: suiteName)
+    print("")
+    print("\(checks - failures)/\(checks) checks passed")
+    exit(failures == 0 ? 0 : 1)
+}
 
 let now = Date(timeIntervalSince1970: 1_800_000_000)
 let hour: TimeInterval = 3600
@@ -39,7 +50,6 @@ func entry(_ label: String, ageHours: Double, expiresInHours: Double? = nil) -> 
 print("▸ Empty store")
 check(SecretHistoryStore.load(defaults: defaults).isEmpty, "load() is empty")
 check(SecretHistoryStore.recent(now: now, defaults: defaults).isEmpty, "recent() is empty")
-check(SecretHistoryStore.nextRecentExpiry(now: now, defaults: defaults) == nil, "nextRecentExpiry() is nil")
 
 print("▸ Ordering: newest first regardless of insertion order")
 // Insert deliberately out of order (oldest first, then newest, then middle).
@@ -79,12 +89,6 @@ check(!recentLater.contains { $0.publicNote == "twenty-three-hours" },
       "23-hour-old entry drops out 1.5 h later without any write")
 check(recentLater.first?.publicNote == "now", "newest is still first")
 
-print("▸ nextRecentExpiry points at the oldest recent entry")
-let expected = justInside.createdAt.addingTimeInterval(SecretHistoryStore.recentWindow)
-let actual = SecretHistoryStore.nextRecentExpiry(now: now, defaults: defaults)
-check(actual != nil && abs(actual!.timeIntervalSince(expected)) < 1,
-      "nextRecentExpiry == oldest-recent.createdAt + 24 h")
-
 print("▸ remove(ids:) and remove(id:)")
 let idsToRemove = Set(SecretHistoryStore.load(defaults: defaults)
     .filter { ["three-days", "thirty-hours"].contains($0.publicNote ?? "") }
@@ -96,13 +100,22 @@ check(!SecretHistoryStore.load(defaults: defaults).contains { $0.id == boundary.
 
 print("▸ Cap at maxEntries keeps the newest")
 SecretHistoryStore.clear(defaults: defaults)
-for i in 0..<(SecretHistoryStore.maxEntries + 25) {
-    SecretHistoryStore.add(entry("bulk-\(i)", ageHours: Double(i) / 60), defaults: defaults)
+// Chronological, like real use: bulk-0 is the oldest, the last one the newest.
+let total = SecretHistoryStore.maxEntries + 25
+for i in 0..<total {
+    SecretHistoryStore.add(entry("bulk-\(i)", ageHours: Double(total - i) / 60), defaults: defaults)
 }
 let capped = SecretHistoryStore.load(defaults: defaults)
 check(capped.count == SecretHistoryStore.maxEntries, "count == maxEntries (\(SecretHistoryStore.maxEntries))")
-check(capped.first?.publicNote == "bulk-0", "newest survives the cap")
-check(!capped.contains { $0.publicNote == "bulk-\(SecretHistoryStore.maxEntries + 24)" }, "oldest is evicted")
+check(capped.first?.publicNote == "bulk-\(total - 1)", "newest survives the cap")
+check(!capped.contains { $0.publicNote == "bulk-0" }, "oldest is evicted")
+
+print("▸ A just-created entry survives the cap even with an odd timestamp")
+let backdated = entry("backdated", ageHours: 24 * 30)  // clock stepped back a month
+SecretHistoryStore.add(backdated, defaults: defaults)
+check(SecretHistoryStore.load(defaults: defaults).contains { $0.id == backdated.id },
+      "back-dated add() is retained (not sorted past the cap and dropped)")
+check(SecretHistoryStore.load(defaults: defaults).count == SecretHistoryStore.maxEntries, "…and the cap still holds")
 
 print("▸ Legacy data: an unsorted array on disk still loads newest first")
 // Simulates history written by older versions (array order == insertion order).
@@ -123,6 +136,4 @@ check(SecretEntry(link: "x", receiptId: "r", secretType: "redirect").displayLabe
 check(!e.isExpired(at: now), "not expired before expiresAt")
 check(e.isExpired(at: now.addingTimeInterval(2 * hour)), "expired after expiresAt")
 
-print("")
-print("\(checks - failures)/\(checks) checks passed")
-exit(failures == 0 ? 0 : 1)
+finish()
