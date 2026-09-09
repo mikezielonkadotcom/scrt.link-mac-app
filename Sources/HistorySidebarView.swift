@@ -4,11 +4,15 @@ import AppKit
 final class HistorySidebarView: NSView {
 
     private let visualEffect = NSVisualEffectView()
-    private let header = NSTextField(labelWithString: "RECENT")
-    private let emptyLabel = NSTextField(labelWithString: "No secrets yet.\nCreated secrets land here for easy re-copy.")
+    private let header = NSTextField(labelWithString: "RECENT · LAST 24 HOURS")
+    private let emptyLabel = NSTextField(labelWithString: "No secrets in the last 24 hours.\nNew links land here; older ones stay in the full log.")
     private let scrollView = NSScrollView()
     private let stack = NSStackView()
     private let clearButton = NSButton()
+    private let logButton = NSButton()
+    /// Re-renders relative timestamps and drops entries that have aged past
+    /// the 24-hour window. Runs only while the view is in a window.
+    private var refreshTimer: Timer?
     private let accountStatusDot = StatusDot()
     private let accountLink = NSButton()
 
@@ -28,7 +32,32 @@ final class HistorySidebarView: NSView {
 
     required init?(coder: NSCoder) { fatalError() }
 
-    deinit { NotificationCenter.default.removeObserver(self) }
+    deinit {
+        NotificationCenter.default.removeObserver(self)
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        if window != nil {
+            startRefreshTimer()
+            reload()
+        } else {
+            refreshTimer?.invalidate()
+            refreshTimer = nil
+        }
+    }
+
+    private func startRefreshTimer() {
+        guard refreshTimer == nil else { return }
+        // Once a minute is enough: relative times only change per minute and
+        // the 24 h cutoff moving by 60 s is invisible to the user.
+        let timer = Timer(timeInterval: 60, target: self, selector: #selector(onRefreshTick), userInfo: nil, repeats: true)
+        timer.tolerance = 5
+        RunLoop.main.add(timer, forMode: .common)
+        refreshTimer = timer
+    }
+
+    @objc private func onRefreshTick() { reload() }
 
     // MARK: - Setup
 
@@ -88,8 +117,21 @@ final class HistorySidebarView: NSView {
         scrollView.scrollerStyle = .overlay
         scrollView.autohidesScrollers = true
         scrollView.drawsBackground = false
+        // AppKit's default clip view is NOT flipped: a document shorter than
+        // the viewport sits at the *bottom*, and a taller one opens scrolled
+        // to the bottom. Either way the newest card (index 0) ended up out of
+        // sight. A flipped clip view anchors y=0 to the top like every other
+        // list on the platform.
+        let clip = FlippedClipView()
+        clip.drawsBackground = false
+        scrollView.contentView = clip
         scrollView.documentView = stack
         scrollView.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            stack.topAnchor.constraint(equalTo: clip.topAnchor),
+            stack.leadingAnchor.constraint(equalTo: clip.leadingAnchor),
+            stack.widthAnchor.constraint(equalTo: clip.widthAnchor),
+        ])
 
         // Empty state
         emptyLabel.alignment = .center
@@ -97,13 +139,26 @@ final class HistorySidebarView: NSView {
         emptyLabel.font = .systemFont(ofSize: 11)
         emptyLabel.textColor = .tertiaryLabelColor
 
-        // Clear footer
-        clearButton.title = "Clear History"
+        // Footer actions: full log (everything retained) + clear (wipes all)
+        logButton.title = "View Full Log…"
+        logButton.bezelStyle = .rounded
+        logButton.controlSize = .small
+        logButton.target = self
+        logButton.action = #selector(logTapped)
+        logButton.toolTip = "Every link this app has created, not just the last 24 hours"
+
+        clearButton.title = "Clear"
         clearButton.bezelStyle = .rounded
         clearButton.controlSize = .small
         clearButton.target = self
         clearButton.action = #selector(clearTapped)
+        clearButton.toolTip = "Delete all local history (recent and full log)"
         clearButton.isHidden = true
+
+        let actionRow = NSStackView(views: [logButton, clearButton])
+        actionRow.orientation = .horizontal
+        actionRow.spacing = 6
+        actionRow.alignment = .centerY
 
         // Account status row: colored dot + state-aware link
         accountStatusDot.translatesAutoresizingMaskIntoConstraints = false
@@ -132,7 +187,7 @@ final class HistorySidebarView: NSView {
         footer.alignment = .centerX
         footer.spacing = 6
         footer.edgeInsets = NSEdgeInsets(top: 10, left: 12, bottom: 14, right: 12)
-        footer.addArrangedSubview(clearButton)
+        footer.addArrangedSubview(actionRow)
         footer.addArrangedSubview(accountRow)
         footer.addArrangedSubview(attribution)
 
@@ -184,19 +239,23 @@ final class HistorySidebarView: NSView {
     @objc private func onHistoryChanged() { reload() }
 
     func reload() {
-        let entries = SecretHistoryStore.load()
+        let now = Date()
+        let entries = SecretHistoryStore.recent(now: now)
+        let hasAnyHistory = !SecretHistoryStore.load().isEmpty
         stack.arrangedSubviews.forEach { $0.removeFromSuperview() }
+
+        clearButton.isHidden = !hasAnyHistory
 
         if entries.isEmpty {
             emptyLabel.isHidden = false
-            clearButton.isHidden = true
             return
         }
         emptyLabel.isHidden = true
-        clearButton.isHidden = false
 
-        for entry in entries {
-            let card = HistoryCardView(entry: entry)
+        // `recent` is already newest-first; keep it explicit so a future
+        // change to the store can't silently flip the sidebar.
+        for entry in SecretHistoryStore.sortedNewestFirst(entries) {
+            let card = HistoryCardView(entry: entry, now: now)
             card.translatesAutoresizingMaskIntoConstraints = false
             stack.addArrangedSubview(card)
             // Width constraint must come AFTER addArrangedSubview — otherwise
@@ -205,6 +264,11 @@ final class HistorySidebarView: NSView {
             // status bar item with it.
             card.widthAnchor.constraint(equalTo: stack.widthAnchor, constant: -20).isActive = true
         }
+
+        // Newest card is at the top; make sure that's what's on screen.
+        stack.layoutSubtreeIfNeeded()
+        scrollView.contentView.scroll(to: .zero)
+        scrollView.reflectScrolledClipView(scrollView.contentView)
     }
 
     // MARK: - Actions
@@ -237,10 +301,14 @@ final class HistorySidebarView: NSView {
         }
     }
 
+    @objc private func logTapped() {
+        (NSApp.delegate as? AppDelegate)?.openSecretLog()
+    }
+
     @objc private func clearTapped() {
         let alert = NSAlert()
         alert.messageText = "Clear History?"
-        alert.informativeText = "Removes local records of secrets you've created. The secrets on scrt.link itself are unaffected."
+        alert.informativeText = "Removes every local record of secrets you've created — the recent list and the full log. The secrets on scrt.link itself are unaffected."
         alert.addButton(withTitle: "Clear")
         alert.addButton(withTitle: "Cancel")
         alert.alertStyle = .warning
@@ -248,6 +316,13 @@ final class HistorySidebarView: NSView {
             SecretHistoryStore.clear()
         }
     }
+}
+
+// MARK: - Flipped clip view
+
+/// Top-anchored scrolling. See the comment in `HistorySidebarView.setup()`.
+final class FlippedClipView: NSClipView {
+    override var isFlipped: Bool { true }
 }
 
 // MARK: - Status dot
@@ -277,9 +352,11 @@ private final class StatusDot: NSView {
 @MainActor
 private final class HistoryCardView: NSView {
     private let entry: SecretEntry
+    private let now: Date
 
-    init(entry: SecretEntry) {
+    init(entry: SecretEntry, now: Date = Date()) {
         self.entry = entry
+        self.now = now
         super.init(frame: .zero)
         wantsLayer = true
         // Draw on every appearance change so our colors stay in sync.
@@ -350,22 +427,17 @@ private final class HistoryCardView: NSView {
     }
 
     private func labelText() -> String {
-        if let note = entry.publicNote, !note.isEmpty { return note }
-        switch entry.secretType {
-        case "redirect": return "Redirect"
-        case "neogram":  return "Neogram"
-        default:         return "Text secret"
-        }
+        entry.displayLabel
     }
 
     private func subtitleText() -> String {
         let f = RelativeDateTimeFormatter()
         f.unitsStyle = .short
-        let ago = f.localizedString(for: entry.createdAt, relativeTo: Date())
+        let ago = f.localizedString(for: entry.createdAt, relativeTo: now)
         var parts = [entry.secretType.capitalized, ago]
         if let exp = entry.expiresAt {
-            if exp > Date() {
-                parts.append("expires " + f.localizedString(for: exp, relativeTo: Date()))
+            if exp > now {
+                parts.append("expires " + f.localizedString(for: exp, relativeTo: now))
             } else {
                 parts.append("expired")
             }

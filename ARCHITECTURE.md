@@ -99,6 +99,15 @@ scrt.link's threat model: the decryption key lives in the URL's `#` fragment, wh
 
 This app only stores the link, the receipt ID, and metadata (type, public note, expiration) — never the plaintext. Storing plaintext would defeat the one-time-view guarantee if the device were compromised. The link itself is functionally a bearer token for that secret; users should treat the history sidebar accordingly.
 
+`SecretHistoryStore` exposes two views over one JSON array in `UserDefaults`:
+
+- `load()` — the full log, always sorted newest-first on read (so legacy arrays written in insertion order display correctly), capped at 500 entries.
+- `recent(now:)` — the subset created in the last 24 hours. The sidebar renders only this, so it "clears itself" on a rolling basis without ever deleting anything; a once-a-minute timer re-renders it so relative times and the cutoff stay current.
+
+The sidebar's scroll view uses a flipped `NSClipView`. AppKit's default clip view is bottom-anchored, which pinned a short list to the bottom of the pane and opened a long list scrolled to the oldest entry — the newest card was the one you couldn't see.
+
+`SecretLogWindow` is a plain `NSTableView` over `load()`. It never renders the URL column; Copy / Open / Delete act on the selection.
+
 ### 7. Raw `swiftc` build, no Xcode project
 
 `build.sh` invokes `swiftc` directly and hand-assembles the `.app` bundle (`Contents/MacOS/`, `Contents/Resources/`, `Info.plist`). No Xcode project, no SwiftPM, no third-party dependencies. This keeps the repo dead-simple — any developer can read every build step in a 40-line shell script.
@@ -112,8 +121,9 @@ scrt.link-mac-app/
 │   ├── StatusBarController.swift    Menu bar icon + right-click menu
 │   ├── WebViewController.swift      Main window, NSSplitView, mode switching
 │   ├── NativeSecretFormView.swift   The form (AppKit, NSStackView layout)
-│   ├── HistorySidebarView.swift     Left-pane history list with cards
-│   ├── SecretHistoryStore.swift     UserDefaults-backed history
+│   ├── HistorySidebarView.swift     Left-pane list of the last 24 h (cards)
+│   ├── SecretLogWindow.swift        Full-history table window (⌘L)
+│   ├── SecretHistoryStore.swift     UserDefaults-backed history (recent + full)
 │   ├── ScrtLinkAPI.swift            Hidden WebView + Swift↔JS bridge
 │   ├── PreferencesWindow.swift      Preferences panel
 │   ├── Preferences.swift            Simple toggle storage (useWebUI)

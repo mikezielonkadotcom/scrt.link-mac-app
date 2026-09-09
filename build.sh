@@ -17,6 +17,7 @@ swiftc \
   Sources/BrandStyle.swift \
   Sources/SecretHistoryStore.swift \
   Sources/HistorySidebarView.swift \
+  Sources/SecretLogWindow.swift \
   Sources/GlobalHotKey.swift \
   Sources/ServiceProvider.swift \
   Sources/ShortcutRecorderView.swift \

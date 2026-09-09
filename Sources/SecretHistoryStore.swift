@@ -13,43 +13,111 @@ struct SecretEntry: Codable, Identifiable {
     var receiptId: String
     var secretType: String
     var publicNote: String?
-}
 
-enum SecretHistoryStore {
-    private static let key = "scrtLinkHistory"
-    private static let maxEntries = 100
-
-    static func load() -> [SecretEntry] {
-        guard let data = UserDefaults.standard.data(forKey: key) else { return [] }
-        return (try? JSONDecoder().decode([SecretEntry].self, from: data)) ?? []
+    /// Human label: the public note if one was set, otherwise the type.
+    var displayLabel: String {
+        if let note = publicNote, !note.isEmpty { return note }
+        return SecretEntry.typeName(secretType)
     }
 
-    static func save(_ entries: [SecretEntry]) {
+    static func typeName(_ raw: String) -> String {
+        switch raw {
+        case "redirect": return "Redirect"
+        case "neogram":  return "Neogram"
+        default:         return "Text secret"
+        }
+    }
+
+    func isExpired(at now: Date = Date()) -> Bool {
+        guard let exp = expiresAt else { return false }
+        return exp <= now
+    }
+}
+
+/// Two views over one underlying list:
+///
+/// - **Recent** (`recent(...)`): entries created in the last `recentWindow`
+///   (24 h). This is what the sidebar shows, so it clears itself out on a
+///   rolling basis — nothing is deleted, it just ages out of the sidebar.
+/// - **Full log** (`load(...)`): everything retained, newest first, capped at
+///   `maxEntries`. Shown in the Secret Log window.
+///
+/// Every function takes a `UserDefaults` so the store can be exercised
+/// against an isolated suite in tests without touching real app data.
+enum SecretHistoryStore {
+    static let key = "scrtLinkHistory"
+
+    /// Hard cap on retained entries (full log). Oldest fall off first.
+    static let maxEntries = 500
+
+    /// How long an entry stays in the sidebar's "Recent" list.
+    static let recentWindow: TimeInterval = 24 * 60 * 60
+
+    // MARK: - Read
+
+    /// All retained entries, newest first.
+    static func load(defaults: UserDefaults = .standard) -> [SecretEntry] {
+        guard let data = defaults.data(forKey: key) else { return [] }
+        let decoded = (try? JSONDecoder().decode([SecretEntry].self, from: data)) ?? []
+        return sortedNewestFirst(decoded)
+    }
+
+    /// Entries created within `recentWindow` of `now`, newest first.
+    static func recent(now: Date = Date(), defaults: UserDefaults = .standard) -> [SecretEntry] {
+        let cutoff = now.addingTimeInterval(-recentWindow)
+        return load(defaults: defaults).filter { $0.createdAt > cutoff }
+    }
+
+    /// When the oldest entry currently in the recent window will age out,
+    /// or nil if nothing is in the window. Lets the sidebar schedule a
+    /// refresh exactly when the list next changes.
+    static func nextRecentExpiry(now: Date = Date(), defaults: UserDefaults = .standard) -> Date? {
+        guard let oldest = recent(now: now, defaults: defaults).last else { return nil }
+        return oldest.createdAt.addingTimeInterval(recentWindow)
+    }
+
+    static func sortedNewestFirst(_ entries: [SecretEntry]) -> [SecretEntry] {
+        entries.sorted { $0.createdAt > $1.createdAt }
+    }
+
+    // MARK: - Write
+
+    static func save(_ entries: [SecretEntry], defaults: UserDefaults = .standard) {
         guard let data = try? JSONEncoder().encode(entries) else { return }
-        UserDefaults.standard.set(data, forKey: key)
+        defaults.set(data, forKey: key)
     }
 
     @discardableResult
-    static func add(_ entry: SecretEntry) -> [SecretEntry] {
-        var current = load()
+    static func add(_ entry: SecretEntry, defaults: UserDefaults = .standard) -> [SecretEntry] {
+        var current = load(defaults: defaults)
         current.insert(entry, at: 0)
+        current = sortedNewestFirst(current)
         if current.count > maxEntries {
             current = Array(current.prefix(maxEntries))
         }
-        save(current)
-        NotificationCenter.default.post(name: .secretHistoryChanged, object: nil)
+        save(current, defaults: defaults)
+        notifyChanged()
         return current
     }
 
-    static func remove(id: String) {
-        var current = load()
-        current.removeAll { $0.id == id }
-        save(current)
-        NotificationCenter.default.post(name: .secretHistoryChanged, object: nil)
+    static func remove(id: String, defaults: UserDefaults = .standard) {
+        remove(ids: [id], defaults: defaults)
     }
 
-    static func clear() {
-        UserDefaults.standard.removeObject(forKey: key)
+    static func remove(ids: Set<String>, defaults: UserDefaults = .standard) {
+        var current = load(defaults: defaults)
+        current.removeAll { ids.contains($0.id) }
+        save(current, defaults: defaults)
+        notifyChanged()
+    }
+
+    /// Wipes the entire log (recent and full).
+    static func clear(defaults: UserDefaults = .standard) {
+        defaults.removeObject(forKey: key)
+        notifyChanged()
+    }
+
+    private static func notifyChanged() {
         NotificationCenter.default.post(name: .secretHistoryChanged, object: nil)
     }
 }

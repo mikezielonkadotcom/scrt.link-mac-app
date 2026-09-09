@@ -62,6 +62,9 @@ class StatusBarController: NSObject {
         menu.addItem(NSMenuItem(title: "Open Scrt.link", action: #selector(openDashboard), keyEquivalent: ""))
         menu.items.last?.target = self
 
+        menu.addItem(NSMenuItem(title: "Secret Log...", action: #selector(openSecretLog), keyEquivalent: ""))
+        menu.items.last?.target = self
+
         menu.addItem(NSMenuItem.separator())
 
         menu.addItem(NSMenuItem(title: "Check for Updates...", action: #selector(checkForUpdates), keyEquivalent: ""))
@@ -86,6 +89,10 @@ class StatusBarController: NSObject {
 
     @objc private func openPreferences() {
         openPreferencesFromMenu()
+    }
+
+    @objc private func openSecretLog() {
+        (NSApp.delegate as? AppDelegate)?.openSecretLog()
     }
 
     func openPreferencesFromMenu() {

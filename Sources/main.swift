@@ -6,6 +6,7 @@ var globalStatusBarController: StatusBarController?
 var globalWebViewController: WebViewController?
 var globalServiceProvider: ServiceProvider?
 var globalHotKey: GlobalHotKey?
+var globalSecretLogWindow: SecretLogWindow?
 
 @MainActor
 class AppDelegate: NSObject, NSApplicationDelegate {
@@ -89,6 +90,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let viewMenu = NSMenu(title: "View")
         viewMenu.addItem(withTitle: "Reload", action: #selector(reloadPage), keyEquivalent: "r")
         viewMenu.addItem(withTitle: "Open Scrt.link", action: #selector(openDashboard), keyEquivalent: "o")
+        viewMenu.addItem(withTitle: "Secret Log…", action: #selector(openSecretLog), keyEquivalent: "l")
         viewMenu.addItem(NSMenuItem.separator())
         viewMenu.addItem(withTitle: "Run API Diagnostic", action: #selector(runDiagnostic), keyEquivalent: "d")
         viewMenuItem.submenu = viewMenu
@@ -115,6 +117,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc func openDashboard() {
         globalWebViewController?.showWindow()
+    }
+
+    /// Full history of created links (the sidebar only shows the last 24 h).
+    @objc func openSecretLog() {
+        if globalSecretLogWindow == nil {
+            globalSecretLogWindow = SecretLogWindow()
+        }
+        globalSecretLogWindow?.showWindow()
     }
 
     @objc func reloadPage() {
