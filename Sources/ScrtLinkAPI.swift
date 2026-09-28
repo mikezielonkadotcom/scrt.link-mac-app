@@ -149,11 +149,11 @@ class ScrtLinkAPI: NSObject {
 
         let fire: () -> Void = { [weak self] in
             guard let self else { return }
-            self.handleLog("swift->js: calling scrtCreate (js.len=\(js.count))")
+            self.handleLog("swift->js: calling scrtCreate")
             self.webView.evaluateJavaScript(js) { [weak self] _, err in
                 guard let self else { return }
                 if let err {
-                    self.handleLog("evaluateJavaScript error: \(err.localizedDescription)")
+                    self.handleLog("evaluateJavaScript error")
                     if let comp = self.pending {
                         self.pending = nil
                         comp(.failure(.server("JS error: \(err.localizedDescription)")))

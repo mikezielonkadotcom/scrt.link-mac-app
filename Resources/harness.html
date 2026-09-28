@@ -30,12 +30,12 @@ try {
 
     window.scrtCreate = async (apiKey, text, opts) => {
         try {
-            log('scrtCreate begin: text.len=' + text.length + ', opts=' + JSON.stringify(opts) + ', tokenPrefix=' + (apiKey || '').substring(0, 8));
+            log('scrtCreate begin');
             const client = scrtLink(apiKey);
             log('client instance created');
             log('awaiting client.createSecret...');
             const r = await client.createSecret(text, opts || {});
-            log('client.createSecret resolved: ' + (typeof r) + ' ' + JSON.stringify(r).substring(0, 300));
+            log('client.createSecret resolved');
             if (r && r.secretLink) {
                 webkit.messageHandlers.scrtResult.postMessage({
                     ok: true,
@@ -48,7 +48,7 @@ try {
                 webkit.messageHandlers.scrtResult.postMessage({ ok: false, error: 'api: ' + String(msg) });
             }
         } catch (e) {
-            log('scrtCreate threw: ' + String(e));
+            log('scrtCreate threw');
             webkit.messageHandlers.scrtResult.postMessage({
                 ok: false,
                 error: 'createSecret: ' + String(e && e.message ? e.message : e),
@@ -58,7 +58,7 @@ try {
 
     webkit.messageHandlers.scrtReady.postMessage({ stage: 'module-loaded', ready: true });
 } catch (err) {
-    log('module import failed: ' + String(err));
+    log('module import failed');
     webkit.messageHandlers.scrtResult.postMessage({
         ok: false,
         error: 'module import failed: ' + String(err && err.message ? err.message : err),
