@@ -56,7 +56,7 @@ ZIP_FILE=".build/ScrtLink-v$VERSION.zip"
 plutil -insert ScrtLinkTeamID -string "$TEAM_ID" "$APP_BUNDLE/Contents/Info.plist"
 codesign --force --timestamp --options runtime --sign "$DEVELOPER_ID" "$APP_BUNDLE"
 REQUIREMENT="anchor apple generic and certificate leaf[subject.OU] = \"$TEAM_ID\" and identifier \"com.mikezielonka.scrt-link\""
-codesign --verify --deep --strict -R "$REQUIREMENT" "$APP_BUNDLE"
+codesign --verify --deep --strict -R="$REQUIREMENT" "$APP_BUNDLE"
 
 rm -f "$ZIP_FILE"
 ditto -c -k --keepParent "$APP_BUNDLE" "$ZIP_FILE"
@@ -64,7 +64,7 @@ xcrun notarytool submit "$ZIP_FILE" --keychain-profile "$NOTARY_PROFILE" --wait
 xcrun stapler staple "$APP_BUNDLE"
 xcrun stapler validate "$APP_BUNDLE"
 spctl --assess --type execute --verbose "$APP_BUNDLE"
-codesign --verify --deep --strict -R "$REQUIREMENT" "$APP_BUNDLE"
+codesign --verify --deep --strict -R="$REQUIREMENT" "$APP_BUNDLE"
 
 # The ticket is attached to the app, so archive the stapled bundle again.
 rm -f "$ZIP_FILE"
