@@ -44,6 +44,11 @@ cp Resources/harness.html "$APP_BUNDLE/Contents/Resources/"
 
 xattr -cr "$APP_BUNDLE" 2>/dev/null || true
 
+# Seal the finished bundle, including Info.plist and copied resources. This
+# ad hoc signature supports local integrity checks but is not Developer ID.
+codesign --force --sign - "$APP_BUNDLE"
+codesign --verify --deep --strict --verbose=2 "$APP_BUNDLE"
+
 echo "Built: $APP_BUNDLE"
 echo "Run with: open $APP_BUNDLE"
 echo ""

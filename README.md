@@ -26,7 +26,7 @@ All encryption happens client-side inside the app — scrt.link's servers never 
 
 Download the latest `.zip` from [Releases](https://github.com/mikezielonkadotcom/scrt.link-mac-app/releases), unzip, drag `ScrtLink.app` into `/Applications`, launch.
 
-First launch: right-click `ScrtLink.app` → **Open** → **Open** to bypass Gatekeeper (the app is unsigned).
+First launch: right-click `ScrtLink.app` → **Open** → **Open** if Gatekeeper warns (the app has an ad hoc signature, not a Developer ID signature).
 
 ---
 
@@ -127,7 +127,7 @@ Press `⌘D` (or View → **Run API Diagnostic**). The dialog dumps Swift state,
 Needs internet; hits `api.github.com/repos/mikezielonkadotcom/scrt.link-mac-app/releases/latest`.
 
 **App won't launch on first run**
-Right-click `ScrtLink.app` → **Open** → **Open**. macOS Gatekeeper blocks unsigned apps by default.
+Right-click `ScrtLink.app` → **Open** → **Open**. Gatekeeper does not treat an ad hoc signature as an identified developer signature.
 
 ---
 
@@ -169,11 +169,11 @@ See [tests/README.md](tests/README.md) for what each step covers.
 
 **Respect scrt.link's Terms of Service.** By configuring an API token and creating secrets through this app, you agree to abide by scrt.link's ToS and rate limits. Don't use this client to abuse their service. If scrt.link changes their API or client module in a way that breaks this app, updates may lag behind.
 
-**Unsigned binary.** Releases are not code-signed or notarized. macOS Gatekeeper will warn before first launch; right-click → Open to bypass. If you're deploying this in an environment that requires notarization, build from source and sign it yourself.
+**Ad hoc signature.** The build signs the complete app bundle for local integrity verification. Releases are not signed with an Apple Developer ID or notarized. macOS Gatekeeper may warn before first launch; right-click → Open if needed. Trusted distribution requires a Developer ID certificate and notarization.
 
 **No plaintext storage — but links are sensitive.** The app never stores the plaintext of your secrets. It does store the shareable links locally (in `UserDefaults` under `scrtLinkHistory`) along with metadata like type, expiration, and public note. **A scrt.link URL is effectively a bearer credential for that secret** — its `#<key>` fragment is the decryption key. Treat your history the same way you'd treat any credential list: clear it if the device is shared, compromised, or resold. "Clear History" in the sidebar or "Clear Log…" in the Secret Log window wipes local records (it does not affect the secrets themselves on scrt.link).
 
-**API token security.** Your scrt.link bearer token is stored in `UserDefaults` (not Keychain — Keychain prompts on every access for unsigned apps, which broke iteration). Treat it with the same care as any other account credential. If you suspect it's been exposed, regenerate it on scrt.link and update it in Preferences.
+**API token security.** Your scrt.link bearer token is stored in `UserDefaults` (not Keychain — the app lacks a stable Developer ID identity, and Keychain prompted during earlier unsigned builds). Treat it with the same care as any other account credential. If you suspect it's been exposed, regenerate it on scrt.link and update it in Preferences.
 
 **Analytics / telemetry.** None. This app makes two categories of network calls: (1) requests to `https://scrt.link/api/*` to create secrets, and (2) an update check against `api.github.com/repos/mikezielonkadotcom/scrt.link-mac-app/releases/latest` shortly after launch. Nothing is sent anywhere else.
 
