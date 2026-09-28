@@ -13,7 +13,7 @@ What it checks:
 | 1 | All source files + required resources exist |
 | 2 | `Info.plist` is valid and has the right bundle id / executable name |
 | 3 | `build.sh` succeeds |
-| 4 | Built bundle contains an arm64 Mach-O binary and all expected resources |
+| 4 | Built bundle contains an arm64 Mach-O binary, all expected resources, and a structurally valid code signature |
 | 5 | App launches and survives for 5 seconds without crashing |
 | 6 | *(Best-effort)* System Events sees a window + menu bar item |
 | 7 | App terminates cleanly |

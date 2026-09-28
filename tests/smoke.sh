@@ -159,6 +159,12 @@ else
     fail "bundled Info.plist broken"
 fi
 
+if codesign --verify --deep --strict "$BUNDLE_PATH" >/dev/null 2>&1; then
+    pass "complete app bundle has a structurally valid code signature"
+else
+    fail "complete app bundle code signature is invalid"
+fi
+
 # ---- 5. launch & survive ------------------------------------------------
 
 step "Launch"

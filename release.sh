@@ -1,10 +1,10 @@
 #!/bin/bash
 set -e
 
-# @todo Sign and notarize the app before zipping.
+# @todo Sign with Developer ID and notarize the app before zipping.
 #
-# Currently we ship unsigned binaries — users see Gatekeeper warnings on
-# first launch and have to right-click → Open. When Mike's ready with his
+# build.sh applies an ad hoc signature to the complete bundle. Users still see
+# Gatekeeper warnings on first launch. When Mike's ready with his
 # Developer ID cert, plug in here between `./build.sh` and the `zip` step:
 #
 #   TEAM_ID="XXXXXXXXXX"
