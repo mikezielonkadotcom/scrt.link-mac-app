@@ -225,7 +225,7 @@ class UpdateManager {
 
         let bundleID = Bundle.main.bundleIdentifier ?? ""
         let requirement = "anchor apple generic and certificate leaf[subject.OU] = \"\(teamID)\" and identifier \"\(bundleID)\""
-        return run("/usr/bin/codesign", ["--verify", "--strict", "--deep", "-R", requirement, app.path])
+        return run("/usr/bin/codesign", ["--verify", "--strict", "--deep", "-R=\(requirement)", app.path])
             && run("/usr/sbin/spctl", ["--assess", "--type", "execute", app.path])
     }
 
