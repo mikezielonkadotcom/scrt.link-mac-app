@@ -139,6 +139,7 @@ scrt.link-mac-app/
 │   ├── test-autoupdate.sh
 │   └── README.md
 ├── build.sh
+├── package.sh                       Release ZIP without AppleDouble entries
 ├── release.sh
 └── README.md
 ```

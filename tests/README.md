@@ -52,6 +52,14 @@ Compiles `Sources/KeychainStore.swift` with `tests/KeychainStoreTests/main.swift
 
 Compiles `Sources/ScrtLinkAPI.swift` (plus `KeychainStore.swift` and `Preferences.swift`) with `tests/ScrtLinkAPITests/main.swift` and drives the real `Resources/harness.html` in a real `WKWebView`, with only the scrt.link client-module import swapped for an inline fake. No network, no scrt.link account, no Keychain access (the token is injected). Covers the happy path, the diagnostic report omitting the secret text, token and link, recovery after the client module failed to load, an earlier request's timeout not failing a later request, and a timed-out request's late result not completing a later request. Takes about 20 seconds.
 
+## Release archive test
+
+```bash
+./tests/test-release-archive.sh
+```
+
+Builds the app ad hoc, gives every file an extended attribute (macOS adds `com.apple.provenance` to built files), archives it with `package.sh`, and extracts it the way both in-app updaters do: `unzip -o` plus `xattr -cr` (1.6.0 and earlier) and `ditto -x -k` (1.6.1 and later). Each extracted bundle must pass `codesign --verify --deep --strict`. A control archive made without `--norsrc` must break the `unzip` path, proving the test detects the AppleDouble `._*` files that would otherwise land inside the bundle. No signing identity, network, Keychain, or app launch needed.
+
 ## Why not XCUITest / full e2e?
 
 This is a thin WKWebView wrapper around scrt.link. The interesting behavior (creating a secret, encrypting client-side) lives in their web app, not ours. Full UI e2e would mostly be testing them, and would break whenever they redesign the form. The smoke test above covers ~90% of real regressions for a small AppKit wrapper.

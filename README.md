@@ -153,17 +153,18 @@ NOTARY_PROFILE=scrt-link \
 ./release.sh 1.6.1
 ```
 
-The script builds, signs with hardened runtime, verifies the pinned team and bundle ID, notarizes, staples, and packages `.build/ScrtLink-v1.6.1.zip`. It stops on any failure. To publish after review, run the same command from a clean `main` checkout with `--publish`.
+The script builds, signs with hardened runtime, verifies the pinned team and bundle ID, notarizes, staples, and packages `.build/ScrtLink-v1.6.1.zip` with `package.sh`. It stops on any failure. To publish after review, run the same command from a clean `main` checkout with `--publish`.
 
 ## Tests
 
 ```bash
-./tests/test-history-store.sh  # history ordering, 24 h window, cap (headless)
-./tests/test-ui-layout.sh      # sidebar + Secret Log view tree (headless)
-./tests/test-keychain-store.sh # token storage + legacy migration (throwaway Keychain item)
-./tests/test-scrtlink-api.sh   # secret-creation bridge, offline fake module (headless)
-./tests/smoke.sh               # build + launch + UI probe (28+ checks)
-./tests/test-autoupdate.sh     # end-to-end auto-update flow
+./tests/test-history-store.sh   # history ordering, 24 h window, cap (headless)
+./tests/test-ui-layout.sh       # sidebar + Secret Log view tree (headless)
+./tests/test-keychain-store.sh  # token storage + legacy migration (throwaway Keychain item)
+./tests/test-scrtlink-api.sh    # secret-creation bridge, offline fake module (headless)
+./tests/test-release-archive.sh # release ZIP survives both updaters' extraction
+./tests/smoke.sh                # build + launch + UI probe (28+ checks)
+./tests/test-autoupdate.sh      # end-to-end auto-update flow
 ```
 
 `smoke.sh` and `test-autoupdate.sh` launch a build with the app's real bundle ID, so they share its settings and Keychain item. Quit an installed copy before running them.
