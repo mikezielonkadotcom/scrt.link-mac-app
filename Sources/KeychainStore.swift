@@ -2,7 +2,9 @@ import Foundation
 import Security
 
 enum KeychainStore {
-    private static let service = "com.mikezielonka.scrt-link"
+    /// Keychain service that holds the token. Tests point this at a
+    /// throwaway service so they never read, or prompt for, the app's item.
+    nonisolated(unsafe) static var service = "com.mikezielonka.scrt-link"
     // Reuse the account name from the original Keychain-backed builds.
     private static let account = "apiToken"
     private static let legacyDefaultsKey = "scrtLinkApiToken"
@@ -22,23 +24,25 @@ enum KeychainStore {
 
         var result: CFTypeRef?
         let status = SecItemCopyMatching(lookup as CFDictionary, &result)
-        if status == errSecSuccess,
-           let data = result as? Data,
-           let token = String(data: data, encoding: .utf8) {
-            return token
-        }
+        let stored: String? = status == errSecSuccess
+            ? (result as? Data).flatMap { String(data: $0, encoding: .utf8) }
+            : nil
 
-        // Migrate only when the item is absent. A Keychain access error must
-        // never silently make the app fall back to a less protected store.
-        guard status == errSecItemNotFound,
-              let legacyToken = UserDefaults.standard.string(forKey: legacyDefaultsKey),
-              !legacyToken.isEmpty else { return "" }
+        // A Keychain access error must never silently make the app fall back
+        // to a less protected store.
+        guard status == errSecSuccess || status == errSecItemNotFound else { return "" }
+
+        // Builds with Keychain storage never write UserDefaults, so a legacy
+        // value was written by an older build, for example after a rollback
+        // to 1.6.0, and is the newest token. Move it into Keychain even when
+        // an item already exists, so no plaintext copy is left behind.
+        guard let legacyToken = UserDefaults.standard.string(forKey: legacyDefaultsKey),
+              !legacyToken.isEmpty else { return stored ?? "" }
         do {
             try setApiToken(legacyToken)
-            UserDefaults.standard.removeObject(forKey: legacyDefaultsKey)
             return legacyToken
         } catch {
-            return ""
+            return stored ?? ""
         }
     }
 

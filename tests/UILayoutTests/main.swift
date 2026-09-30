@@ -1,4 +1,5 @@
 import AppKit
+import Security
 
 // Headless AppKit layout test, compiled by tests/test-ui-layout.sh together
 // with every app source except Sources/main.swift (this file supplies a stub
@@ -20,6 +21,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc func openPreferences() {}
     @objc func openSecretLog() {}
 }
+
+// The sidebar reads KeychainStore.hasToken. Point it at a throwaway service
+// that never exists, so this unsigned binary never reads the app's real
+// token item (which would raise a Keychain access prompt and block the run).
+KeychainStore.service = "com.mikezielonka.scrt-link.ui-layout-tests.\(UUID().uuidString)"
+SecKeychainSetUserInteractionAllowed(false)  // fail fast, never prompt
 
 var failures = 0
 var checks = 0
