@@ -28,7 +28,9 @@ try {
     const scrtLink = mod.default;
     log('client module imported');
 
-    window.scrtCreate = async (apiKey, text, opts) => {
+    // requestId is echoed back so Swift can ignore a late result from a
+    // request it already timed out.
+    window.scrtCreate = async (apiKey, text, opts, requestId) => {
         try {
             log('scrtCreate begin');
             const client = scrtLink(apiKey);
@@ -42,16 +44,18 @@ try {
                     link: r.secretLink,
                     receiptId: r.receiptId || '',
                     expiresAt: r.expiresAt || '',
+                    requestId,
                 });
             } else {
                 const msg = (r && (r.message || r.error)) || JSON.stringify(r);
-                webkit.messageHandlers.scrtResult.postMessage({ ok: false, error: 'api: ' + String(msg) });
+                webkit.messageHandlers.scrtResult.postMessage({ ok: false, error: 'api: ' + String(msg), requestId });
             }
         } catch (e) {
             log('scrtCreate threw');
             webkit.messageHandlers.scrtResult.postMessage({
                 ok: false,
                 error: 'createSecret: ' + String(e && e.message ? e.message : e),
+                requestId,
             });
         }
     };
@@ -59,8 +63,10 @@ try {
     webkit.messageHandlers.scrtReady.postMessage({ stage: 'module-loaded', ready: true });
 } catch (err) {
     log('module import failed');
+    // fatal: this harness load can never become ready; Swift reloads it.
     webkit.messageHandlers.scrtResult.postMessage({
         ok: false,
+        fatal: true,
         error: 'module import failed: ' + String(err && err.message ? err.message : err),
     });
 }

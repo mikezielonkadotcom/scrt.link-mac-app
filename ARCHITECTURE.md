@@ -78,6 +78,8 @@ Setting the WebView's baseURL to scrt.link makes the page's origin match, so:
 
 Fix: wrap the call in `void`, which makes the expression evaluate to `undefined` (serializable). The real result comes back via the `scrtResult` message.
 
+Each call also passes a request ID that the harness echoes in its `scrtResult` message. Only the matching request's result or 15-second timeout can complete it, so an earlier request's timer or late result can't complete, or fail, a newer one. A failed client-module import is reported as fatal, and a failed harness load or a terminated web content process marks the harness failed. The next Create reloads the harness instead of waiting behind one that will never become ready.
+
 ### 4. `JSONSerialization` with `.fragmentsAllowed`
 
 By default, `JSONSerialization` refuses top-level scalars (Strings, Numbers, Bools) — it throws. The original code used `try?`, so the throw silently returned `nil`, which made the JS expression look like `window.scrtCreate(, , {...})` — a syntax error — and the call hung.
