@@ -34,7 +34,31 @@ Compiles `Sources/SecretHistoryStore.swift` with `tests/HistoryStoreTests/main.s
 ./tests/test-ui-layout.sh
 ```
 
-Compiles every app source except `main.swift` together with `tests/UILayoutTests/main.swift` (which supplies a stub `AppDelegate`), builds the real `HistorySidebarView` and `SecretLogWindow` in offscreen windows, and inspects the view tree: flipped clip view, newest card on top, list opens scrolled to the top even when it overflows, only the last 24 h in the sidebar, every entry in the log table, no bearer link rendered. Runs headless — no Screen Recording or Accessibility permission needed, so it works in a plain shell where `smoke.sh`'s UI probe cannot.
+Compiles every app source except `main.swift` together with `tests/UILayoutTests/main.swift` (which supplies a stub `AppDelegate` and points the token lookup at a throwaway Keychain service), builds the real `HistorySidebarView` and `SecretLogWindow` in offscreen windows, and inspects the view tree: flipped clip view, newest card on top, list opens scrolled to the top even when it overflows, only the last 24 h in the sidebar, every entry in the log table, no bearer link rendered. Runs headless — no Screen Recording or Accessibility permission needed, so it works in a plain shell where `smoke.sh`'s UI probe cannot.
+
+## Keychain store test
+
+```bash
+./tests/test-keychain-store.sh
+```
+
+Compiles `Sources/KeychainStore.swift` with `tests/KeychainStoreTests/main.swift`. Points `KeychainStore.service` at a throwaway service unique to the run, so the app's real token item is never read or changed, and deletes its test item before exit. Keychain user interaction is disabled, so a locked keychain fails fast instead of prompting. Covers the empty state, migration of a legacy `UserDefaults` token, save and clear, and a newer legacy token left by an older build (for example after rolling back to 1.6.0) replacing a stale Keychain value without leaving a plaintext copy.
+
+## Secret-creation bridge test
+
+```bash
+./tests/test-scrtlink-api.sh
+```
+
+Compiles `Sources/ScrtLinkAPI.swift` (plus `KeychainStore.swift` and `Preferences.swift`) with `tests/ScrtLinkAPITests/main.swift` and drives the real `Resources/harness.html` in a real `WKWebView`, with only the scrt.link client-module import swapped for an inline fake. No network, no scrt.link account, no Keychain access (the token is injected). Covers the happy path, the diagnostic report omitting the secret text, token and link, recovery after the client module failed to load, an earlier request's timeout not failing a later request, and a timed-out request's late result not completing a later request. Takes about 20 seconds.
+
+## Release archive test
+
+```bash
+./tests/test-release-archive.sh
+```
+
+Builds the app ad hoc, gives every file an extended attribute (macOS adds `com.apple.provenance` to built files), archives it with `package.sh`, and extracts it the way both in-app updaters do: `unzip -o` plus `xattr -cr` (1.6.0 and earlier) and `ditto -x -k` (1.6.1 and later). Each extracted bundle must pass `codesign --verify --deep --strict`. A control archive made without `--norsrc` must break the `unzip` path, proving the test detects the AppleDouble `._*` files that would otherwise land inside the bundle. No signing identity, network, Keychain, or app launch needed.
 
 ## Why not XCUITest / full e2e?
 

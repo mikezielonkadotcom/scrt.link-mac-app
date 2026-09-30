@@ -26,7 +26,7 @@ All encryption happens client-side inside the app — scrt.link's servers never 
 
 Download the latest `.zip` from [Releases](https://github.com/mikezielonkadotcom/scrt.link-mac-app/releases), unzip, drag `ScrtLink.app` into `/Applications`, launch.
 
-First launch: right-click `ScrtLink.app` → **Open** → **Open** if Gatekeeper warns (the app has an ad hoc signature, not a Developer ID signature).
+Older releases use an ad hoc signature and may trigger a Gatekeeper warning. New releases produced by `release.sh` are Developer ID signed and notarized.
 
 ---
 
@@ -90,7 +90,7 @@ For file secrets or free-tier usage:
 |---|---|
 | Launch at Login | Starts the app on login (`SMAppService`) |
 | Show in Dock | Toggles `.regular` ↔ `.accessory` activation policy |
-| API Token | Bearer token for scrt.link API (stored in UserDefaults) |
+| API Token | Bearer token for scrt.link API (stored in macOS Keychain) |
 | Use Web UI | Swaps native form for embedded scrt.link web view |
 | Clear Website Data | Clears cookies/cache for the embedded web view |
 
@@ -126,8 +126,8 @@ Press `⌘D` (or View → **Run API Diagnostic**). The dialog dumps Swift state,
 **"Update Check Failed"**
 Needs internet; hits `api.github.com/repos/mikezielonkadotcom/scrt.link-mac-app/releases/latest`.
 
-**App won't launch on first run**
-Right-click `ScrtLink.app` → **Open** → **Open**. Gatekeeper does not treat an ad hoc signature as an identified developer signature.
+**Local development build won't launch on first run**
+Right-click `ScrtLink.app` → **Open** → **Open**. The local build has an ad hoc signature. Release builds are Developer ID signed and notarized.
 
 ---
 
@@ -144,18 +144,30 @@ Raw `swiftc` — no Xcode project, no SwiftPM.
 
 ## Release
 
+Set both version fields in `Resources/Info.plist` first. Install a Developer ID Application certificate with its private key in your login Keychain and store notarization credentials with `xcrun notarytool store-credentials`. Then:
+
 ```bash
-./release.sh 1.3.0
+TEAM_ID=YOUR_TEAM_ID \
+DEVELOPER_ID='Developer ID Application: Your Name (YOUR_TEAM_ID)' \
+NOTARY_PROFILE=scrt-link \
+./release.sh 1.6.1
 ```
 
-Bumps `Resources/Info.plist`, builds, zips, creates a GitHub release via `gh` (or curl fallback).
+The script builds, signs with hardened runtime, verifies the pinned team and bundle ID, notarizes, staples, and packages `.build/ScrtLink-v1.6.1.zip` with `package.sh`. It stops on any failure. To publish after review, run the same command from a clean `main` checkout with `--publish`.
 
 ## Tests
 
 ```bash
-./tests/smoke.sh           # build + launch + UI probe (28+ checks)
-./tests/test-autoupdate.sh # end-to-end auto-update flow
+./tests/test-history-store.sh   # history ordering, 24 h window, cap (headless)
+./tests/test-ui-layout.sh       # sidebar + Secret Log view tree (headless)
+./tests/test-keychain-store.sh  # token storage + legacy migration (throwaway Keychain item)
+./tests/test-scrtlink-api.sh    # secret-creation bridge, offline fake module (headless)
+./tests/test-release-archive.sh # release ZIP survives both updaters' extraction
+./tests/smoke.sh                # build + launch + UI probe (28+ checks)
+./tests/test-autoupdate.sh      # end-to-end auto-update flow
 ```
+
+`smoke.sh` and `test-autoupdate.sh` launch a build with the app's real bundle ID, so they share its settings and Keychain item. Quit an installed copy before running them.
 
 See [tests/README.md](tests/README.md) for what each step covers.
 
@@ -169,11 +181,11 @@ See [tests/README.md](tests/README.md) for what each step covers.
 
 **Respect scrt.link's Terms of Service.** By configuring an API token and creating secrets through this app, you agree to abide by scrt.link's ToS and rate limits. Don't use this client to abuse their service. If scrt.link changes their API or client module in a way that breaks this app, updates may lag behind.
 
-**Ad hoc signature.** The build signs the complete app bundle for local integrity verification. Releases are not signed with an Apple Developer ID or notarized. macOS Gatekeeper may warn before first launch; right-click → Open if needed. Trusted distribution requires a Developer ID certificate and notarization.
+**Signing.** `build.sh` signs local development builds ad hoc. `release.sh` requires a Developer ID Application certificate and notarization before it produces a release archive. Local builds may trigger Gatekeeper's first-launch warning.
 
 **No plaintext storage — but links are sensitive.** The app never stores the plaintext of your secrets. It does store the shareable links locally (in `UserDefaults` under `scrtLinkHistory`) along with metadata like type, expiration, and public note. **A scrt.link URL is effectively a bearer credential for that secret** — its `#<key>` fragment is the decryption key. Treat your history the same way you'd treat any credential list: clear it if the device is shared, compromised, or resold. "Clear History" in the sidebar or "Clear Log…" in the Secret Log window wipes local records (it does not affect the secrets themselves on scrt.link).
 
-**API token security.** Your scrt.link bearer token is stored in `UserDefaults` (not Keychain — the app lacks a stable Developer ID identity, and Keychain prompted during earlier unsigned builds). Treat it with the same care as any other account credential. If you suspect it's been exposed, regenerate it on scrt.link and update it in Preferences.
+**API token security.** Your scrt.link bearer token is stored in macOS Keychain. On first launch, the app moves any token saved by an older version from `UserDefaults` into Keychain and removes the old copy after a successful write. If you suspect a token has been exposed, revoke it on scrt.link and update it in Preferences.
 
 **Analytics / telemetry.** None. This app makes two categories of network calls: (1) requests to `https://scrt.link/api/*` to create secrets, and (2) an update check against `api.github.com/repos/mikezielonkadotcom/scrt.link-mac-app/releases/latest` shortly after launch. Nothing is sent anywhere else.
 

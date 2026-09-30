@@ -271,14 +271,19 @@ class PreferencesWindow {
 
     @objc private func saveToken() {
         let token = apiTokenField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-        KeychainStore.apiToken = token
-
         let alert = NSAlert()
-        alert.messageText = token.isEmpty ? "Token Cleared" : "Token Saved"
-        alert.informativeText = token.isEmpty
-            ? "The API token has been removed."
-            : "The API token has been saved."
-        alert.alertStyle = .informational
+        do {
+            try KeychainStore.setApiToken(token)
+            alert.messageText = token.isEmpty ? "Token Cleared" : "Token Saved"
+            alert.informativeText = token.isEmpty
+                ? "The API token has been removed from Keychain."
+                : "The API token has been saved in Keychain."
+            alert.alertStyle = .informational
+        } catch {
+            alert.messageText = "Token Not Saved"
+            alert.informativeText = error.localizedDescription
+            alert.alertStyle = .warning
+        }
         alert.addButton(withTitle: "OK")
         alert.runModal()
     }

@@ -73,9 +73,13 @@ class UpdateManager {
     }
 
     private func promptForUpdate(version: String, releaseNotes: String, assets: [[String: Any]]) {
-        guard let asset = assets.first(where: { ($0["name"] as? String)?.hasSuffix(".zip") == true }),
+        let expectedName = "ScrtLink-v\(version).zip"
+        guard let asset = assets.first(where: { ($0["name"] as? String) == expectedName }),
               let downloadURLString = asset["browser_download_url"] as? String,
-              let downloadURL = URL(string: downloadURLString) else {
+              let downloadURL = URL(string: downloadURLString),
+              downloadURL.scheme == "https",
+              downloadURL.host == "github.com",
+              downloadURL.path == "/\(repoOwner)/\(repoName)/releases/download/v\(version)/\(expectedName)" else {
             showAlert(title: "Update Available (v\(version))", message: "A new version is available but no downloadable package was found.\n\nPlease update manually from GitHub.")
             return
         }
@@ -125,63 +129,118 @@ class UpdateManager {
                     return
                 }
 
-                self?.installUpdate(from: tempURL)
+                self?.installUpdate(from: tempURL, version: version)
             }
         }
         task.resume()
     }
 
-    private func installUpdate(from zipURL: URL) {
+    private func installUpdate(from zipURL: URL, version: String) {
         let fileManager = FileManager.default
         let tempDir = fileManager.temporaryDirectory.appendingPathComponent("ScrtLink-update-\(UUID().uuidString)")
 
         do {
             try fileManager.createDirectory(at: tempDir, withIntermediateDirectories: true)
+            defer { try? fileManager.removeItem(at: tempDir) }
 
             let zipDest = tempDir.appendingPathComponent("update.zip")
             try fileManager.copyItem(at: zipURL, to: zipDest)
 
-            let unzipProcess = Process()
-            unzipProcess.executableURL = URL(fileURLWithPath: "/usr/bin/unzip")
-            unzipProcess.arguments = ["-o", zipDest.path, "-d", tempDir.path]
-            try unzipProcess.run()
-            unzipProcess.waitUntilExit()
-
-            guard unzipProcess.terminationStatus == 0 else {
+            guard run("/usr/bin/ditto", ["-x", "-k", zipDest.path, tempDir.path]) else {
                 showAlert(title: "Update Failed", message: "Could not unzip the update package.")
                 return
             }
 
-            let contents = try fileManager.contentsOfDirectory(at: tempDir, includingPropertiesForKeys: nil)
-            guard let newApp = contents.first(where: { $0.pathExtension == "app" }) else {
+            let newApp = tempDir.appendingPathComponent("ScrtLink.app")
+            guard fileManager.fileExists(atPath: newApp.path),
+                  newApp.resolvingSymlinksInPath().path.hasPrefix(tempDir.path + "/") else {
                 showAlert(title: "Update Failed", message: "No .app found in the update package.")
                 return
             }
 
-            guard let currentAppURL = Bundle.main.bundleURL as URL? else {
-                showAlert(title: "Update Failed", message: "Could not determine current app location.")
+            guard verifyUpdate(newApp, version: version) else {
+                showAlert(title: "Update Rejected", message: "The update did not pass app identity and Apple signature checks. Download it manually from the project release page if needed.")
                 return
             }
 
-            let backupURL = tempDir.appendingPathComponent("ScrtLink-old.app")
-            try fileManager.moveItem(at: currentAppURL, to: backupURL)
-            try fileManager.copyItem(at: newApp, to: currentAppURL)
+            let currentAppURL = Bundle.main.bundleURL
+            let stagedURL = currentAppURL.deletingLastPathComponent()
+                .appendingPathComponent(".ScrtLink-update-\(UUID().uuidString).app")
+            let backupURL = currentAppURL.deletingLastPathComponent()
+                .appendingPathComponent(".ScrtLink-backup-\(UUID().uuidString).app")
+            try fileManager.copyItem(at: newApp, to: stagedURL)
+            do {
+                try fileManager.moveItem(at: currentAppURL, to: backupURL)
+                do {
+                    try fileManager.moveItem(at: stagedURL, to: currentAppURL)
+                } catch {
+                    let installError = error
+                    do {
+                        try fileManager.moveItem(at: backupURL, to: currentAppURL)
+                    } catch {
+                        throw updateError("Installation failed and the old app could not be restored. Its backup is at \(backupURL.path). \(error.localizedDescription)")
+                    }
+                    throw installError
+                }
+            } catch {
+                try? fileManager.removeItem(at: stagedURL)
+                throw error
+            }
 
-            let xattrProcess = Process()
-            xattrProcess.executableURL = URL(fileURLWithPath: "/usr/bin/xattr")
-            xattrProcess.arguments = ["-cr", currentAppURL.path]
-            try? xattrProcess.run()
-            xattrProcess.waitUntilExit()
+            guard run("/usr/bin/open", ["-n", currentAppURL.path]) else {
+                do {
+                    try fileManager.removeItem(at: currentAppURL)
+                    try fileManager.moveItem(at: backupURL, to: currentAppURL)
+                } catch {
+                    throw updateError("The new app could not launch and the old app could not be restored. Its backup is at \(backupURL.path). \(error.localizedDescription)")
+                }
+                throw updateError("The new app could not launch. The old app was restored.")
+            }
 
-            let relaunchProcess = Process()
-            relaunchProcess.executableURL = URL(fileURLWithPath: "/usr/bin/open")
-            relaunchProcess.arguments = ["-n", currentAppURL.path]
-            try relaunchProcess.run()
+            // Keep the old app as a recovery copy. A successful `open` only
+            // confirms LaunchServices accepted the new app, not that its UI
+            // will keep running. Never discard the backup in this process.
 
             NSApp.terminate(nil)
 
         } catch {
             showAlert(title: "Update Failed", message: error.localizedDescription)
+        }
+    }
+
+    private func updateError(_ message: String) -> NSError {
+        NSError(domain: "com.mikezielonka.scrt-link.update", code: 1,
+                userInfo: [NSLocalizedDescriptionKey: message])
+    }
+
+    private func verifyUpdate(_ app: URL, version: String) -> Bool {
+        guard let teamID = Bundle.main.object(forInfoDictionaryKey: "ScrtLinkTeamID") as? String,
+              !teamID.isEmpty,
+              teamID.range(of: "^[A-Z0-9]{10}$", options: .regularExpression) != nil,
+              let bundle = Bundle(url: app),
+              bundle.bundleIdentifier == Bundle.main.bundleIdentifier,
+              bundle.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String == version else {
+            return false
+        }
+
+        let bundleID = Bundle.main.bundleIdentifier ?? ""
+        let requirement = "anchor apple generic and certificate leaf[subject.OU] = \"\(teamID)\" and identifier \"\(bundleID)\""
+        return run("/usr/bin/codesign", ["--verify", "--strict", "--deep", "-R=\(requirement)", app.path])
+            && run("/usr/sbin/spctl", ["--assess", "--type", "execute", app.path])
+    }
+
+    private func run(_ executable: String, _ arguments: [String]) -> Bool {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: executable)
+        process.arguments = arguments
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        do {
+            try process.run()
+            process.waitUntilExit()
+            return process.terminationStatus == 0
+        } catch {
+            return false
         }
     }
 

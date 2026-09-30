@@ -28,39 +28,45 @@ try {
     const scrtLink = mod.default;
     log('client module imported');
 
-    window.scrtCreate = async (apiKey, text, opts) => {
+    // requestId is echoed back so Swift can ignore a late result from a
+    // request it already timed out.
+    window.scrtCreate = async (apiKey, text, opts, requestId) => {
         try {
-            log('scrtCreate begin: text.len=' + text.length + ', opts=' + JSON.stringify(opts) + ', tokenPrefix=' + (apiKey || '').substring(0, 8));
+            log('scrtCreate begin');
             const client = scrtLink(apiKey);
             log('client instance created');
             log('awaiting client.createSecret...');
             const r = await client.createSecret(text, opts || {});
-            log('client.createSecret resolved: ' + (typeof r) + ' ' + JSON.stringify(r).substring(0, 300));
+            log('client.createSecret resolved');
             if (r && r.secretLink) {
                 webkit.messageHandlers.scrtResult.postMessage({
                     ok: true,
                     link: r.secretLink,
                     receiptId: r.receiptId || '',
                     expiresAt: r.expiresAt || '',
+                    requestId,
                 });
             } else {
                 const msg = (r && (r.message || r.error)) || JSON.stringify(r);
-                webkit.messageHandlers.scrtResult.postMessage({ ok: false, error: 'api: ' + String(msg) });
+                webkit.messageHandlers.scrtResult.postMessage({ ok: false, error: 'api: ' + String(msg), requestId });
             }
         } catch (e) {
-            log('scrtCreate threw: ' + String(e));
+            log('scrtCreate threw');
             webkit.messageHandlers.scrtResult.postMessage({
                 ok: false,
                 error: 'createSecret: ' + String(e && e.message ? e.message : e),
+                requestId,
             });
         }
     };
 
     webkit.messageHandlers.scrtReady.postMessage({ stage: 'module-loaded', ready: true });
 } catch (err) {
-    log('module import failed: ' + String(err));
+    log('module import failed');
+    // fatal: this harness load can never become ready; Swift reloads it.
     webkit.messageHandlers.scrtResult.postMessage({
         ok: false,
+        fatal: true,
         error: 'module import failed: ' + String(err && err.message ? err.message : err),
     });
 }

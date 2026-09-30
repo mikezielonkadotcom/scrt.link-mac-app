@@ -1,113 +1,79 @@
 #!/bin/bash
-set -e
+set -euo pipefail
 
-# @todo Sign with Developer ID and notarize the app before zipping.
+# Build a Developer ID signed, notarized, stapled archive. Publishing is an
+# explicit second step so a failed notarization can never create a release.
 #
-# build.sh applies an ad hoc signature to the complete bundle. Users still see
-# Gatekeeper warnings on first launch. When Mike's ready with his
-# Developer ID cert, plug in here between `./build.sh` and the `zip` step:
-#
-#   TEAM_ID="XXXXXXXXXX"
-#   APPLE_ID="me@mikezielonka.com"
-#   APP_PASSWORD="app-specific-password"   # appleid.apple.com
-#
-#   codesign --force --deep --timestamp \
-#       --options runtime \
-#       --sign "Developer ID Application: Mike Zielonka ($TEAM_ID)" \
-#       "$APP_BUNDLE"
-#
-#   # (zip happens here)
-#
-#   xcrun notarytool submit "$ZIP_FILE" \
-#       --apple-id "$APPLE_ID" \
-#       --team-id "$TEAM_ID" \
-#       --password "$APP_PASSWORD" \
-#       --wait
-#
-#   # Staple the ticket into the .app, then re-zip
-#   xcrun stapler staple "$APP_BUNDLE"
-#   (cd "$BUILD_DIR" && rm "$ZIP_NAME" && zip -r "$ZIP_NAME" "$APP.app")
-#
-# After this lands we can also move the scrt.link bearer token back to
-# Keychain (see Sources/KeychainStore.swift header comment) since
-# Keychain won't re-prompt when the binary is stably signed.
+# Usage: TEAM_ID=... DEVELOPER_ID='Developer ID Application: ...' \
+#        NOTARY_PROFILE=scrt-link ./release.sh 1.6.1 [--publish]
 
-# Usage: ./release.sh <version> [GITHUB_TOKEN]
+VERSION="${1:-}"
+PUBLISH="${2:-}"
+if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] ||
+   { [[ -n "$PUBLISH" ]] && [[ "$PUBLISH" != "--publish" ]]; }; then
+    echo "Usage: TEAM_ID=... DEVELOPER_ID=... NOTARY_PROFILE=... ./release.sh <version> [--publish]" >&2
+    exit 2
+fi
 
-if [ -z "$1" ]; then
-    echo "Usage: ./release.sh <version> [GITHUB_TOKEN]"
-    echo "Example: ./release.sh 1.0.1"
+: "${TEAM_ID:?Set the Apple Developer team ID}"
+: "${DEVELOPER_ID:?Set the Developer ID Application signing identity}"
+: "${NOTARY_PROFILE:?Set a notarytool Keychain profile}"
+if [[ ! "$TEAM_ID" =~ ^[A-Z0-9]{10}$ ]]; then
+    echo "TEAM_ID must be a 10-character Apple team ID" >&2
+    exit 2
+fi
+
+cd "$(dirname "$0")"
+PLIST_VERSION="$(plutil -extract CFBundleShortVersionString raw Resources/Info.plist)"
+BUILD_VERSION="$(plutil -extract CFBundleVersion raw Resources/Info.plist)"
+if [[ "$PLIST_VERSION" != "$VERSION" || "$BUILD_VERSION" != "$VERSION" ]]; then
+    echo "Set both Info.plist version fields to $VERSION before releasing" >&2
     exit 1
 fi
 
-VERSION="$1"
-TOKEN="${2:-$GITHUB_TOKEN}"
-REPO="mikezielonkadotcom/scrt.link-mac-app"
-APP="ScrtLink"
-BUILD_DIR=".build"
-APP_BUNDLE="$BUILD_DIR/$APP.app"
-ZIP_NAME="$APP-v$VERSION.zip"
-ZIP_FILE="$BUILD_DIR/$ZIP_NAME"
+if [[ "$PUBLISH" == "--publish" ]]; then
+    [[ "$(git branch --show-current)" == "main" ]] || { echo "Publish from main only" >&2; exit 1; }
+    [[ -z "$(git status --porcelain)" ]] || { echo "Publish from a clean checkout" >&2; exit 1; }
+    command -v gh >/dev/null || { echo "gh CLI is required to publish" >&2; exit 1; }
+    git fetch --quiet origin main
+    HEAD_SHA="$(git rev-parse HEAD)"
+    [[ "$HEAD_SHA" == "$(git rev-parse refs/remotes/origin/main)" ]] || {
+        echo "Local main differs from origin/main; push or update before publishing" >&2
+        exit 1
+    }
+    [[ -z "$(git ls-remote --tags origin "refs/tags/v$VERSION")" ]] || {
+        echo "Tag v$VERSION already exists on origin" >&2
+        exit 1
+    }
+fi
 
-sed -i '' "s|<string>[0-9]*\.[0-9]*\.[0-9]*</string>|<string>$VERSION</string>|g" Resources/Info.plist
-
-echo "Building v$VERSION..."
 ./build.sh
+APP_BUNDLE=".build/ScrtLink.app"
+ZIP_FILE=".build/ScrtLink-v$VERSION.zip"
 
-echo "Packaging..."
-cd "$BUILD_DIR"
-zip -r "$ZIP_NAME" "$APP.app"
-cd ..
+# This value is sealed by the app signature and pins the team for future
+# in-app updates. Local ad hoc builds omit it and cannot auto-install updates.
+plutil -insert ScrtLinkTeamID -string "$TEAM_ID" "$APP_BUNDLE/Contents/Info.plist"
+codesign --force --timestamp --options runtime --sign "$DEVELOPER_ID" "$APP_BUNDLE"
+REQUIREMENT="anchor apple generic and certificate leaf[subject.OU] = \"$TEAM_ID\" and identifier \"com.mikezielonka.scrt-link\""
+codesign --verify --deep --strict -R="$REQUIREMENT" "$APP_BUNDLE"
 
-echo ""
-echo "Built: $ZIP_FILE"
+./package.sh "$APP_BUNDLE" "$ZIP_FILE"
+xcrun notarytool submit "$ZIP_FILE" --keychain-profile "$NOTARY_PROFILE" --wait
+xcrun stapler staple "$APP_BUNDLE"
+xcrun stapler validate "$APP_BUNDLE"
+spctl --assess --type execute --verbose "$APP_BUNDLE"
+codesign --verify --deep --strict -R="$REQUIREMENT" "$APP_BUNDLE"
 
-if command -v gh &> /dev/null; then
-    echo "Creating GitHub release v$VERSION via gh..."
-    gh release create "v$VERSION" \
-        "$ZIP_FILE" \
+# The ticket is attached to the app, so archive the stapled bundle again.
+./package.sh "$APP_BUNDLE" "$ZIP_FILE"
+echo "Ready: $ZIP_FILE"
+
+if [[ "$PUBLISH" == "--publish" ]]; then
+    gh release create "v$VERSION" "$ZIP_FILE" \
+        --repo mikezielonkadotcom/scrt.link-mac-app \
+        --target "$HEAD_SHA" \
         --title "v$VERSION" \
         --notes "Scrt.link v$VERSION" \
         --latest
-    echo "Release v$VERSION published!"
-
-elif [ -n "$TOKEN" ]; then
-    echo "Creating GitHub release v$VERSION via API..."
-
-    RELEASE_JSON=$(curl -s -X POST \
-        -H "Authorization: token $TOKEN" \
-        -H "Accept: application/vnd.github+json" \
-        "https://api.github.com/repos/$REPO/releases" \
-        -d "{\"tag_name\":\"v$VERSION\",\"name\":\"v$VERSION\",\"body\":\"Scrt.link v$VERSION\",\"draft\":false,\"prerelease\":false}")
-
-    UPLOAD_URL=$(echo "$RELEASE_JSON" | grep -o '"upload_url": "[^"]*"' | sed 's/"upload_url": "//;s/"//' | sed 's/{.*//')
-
-    if [ -z "$UPLOAD_URL" ]; then
-        echo "Failed to create release. Response:"
-        echo "$RELEASE_JSON"
-        exit 1
-    fi
-
-    echo "Uploading $ZIP_NAME..."
-    curl -s -X POST \
-        -H "Authorization: token $TOKEN" \
-        -H "Content-Type: application/zip" \
-        "$UPLOAD_URL?name=$ZIP_NAME" \
-        --data-binary "@$ZIP_FILE" > /dev/null
-
-    echo "Release v$VERSION published!"
-    echo "https://github.com/$REPO/releases/tag/v$VERSION"
-
-else
-    echo ""
-    echo "No gh CLI or GITHUB_TOKEN found. To publish the release:"
-    echo ""
-    echo "  Option 1: Set a token and re-run"
-    echo "    export GITHUB_TOKEN=ghp_your_token_here"
-    echo "    ./release.sh $VERSION"
-    echo ""
-    echo "  Option 2: Upload manually"
-    echo "    https://github.com/$REPO/releases/new"
-    echo "    Tag: v$VERSION"
-    echo "    Upload: $ZIP_FILE"
 fi

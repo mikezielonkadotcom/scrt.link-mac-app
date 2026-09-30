@@ -78,20 +78,17 @@ Setting the WebView's baseURL to scrt.link makes the page's origin match, so:
 
 Fix: wrap the call in `void`, which makes the expression evaluate to `undefined` (serializable). The real result comes back via the `scrtResult` message.
 
+Each call also passes a request ID that the harness echoes in its `scrtResult` message. Only the matching request's result or 15-second timeout can complete it, so an earlier request's timer or late result can't complete, or fail, a newer one. A failed client-module import is reported as fatal, and a failed harness load or a terminated web content process marks the harness failed. The next Create reloads the harness instead of waiting behind one that will never become ready.
+
 ### 4. `JSONSerialization` with `.fragmentsAllowed`
 
 By default, `JSONSerialization` refuses top-level scalars (Strings, Numbers, Bools) — it throws. The original code used `try?`, so the throw silently returned `nil`, which made the JS expression look like `window.scrtCreate(, , {...})` — a syntax error — and the call hung.
 
 `.fragmentsAllowed` lets it encode any JSON-compatible value, including bare strings for the token and secret text.
 
-### 5. UserDefaults for the API token (not Keychain)
+### 5. Keychain for the API token
 
-Keychain prompts the user on every access when the app is unsigned. Every rebuild changes the binary signature, so iteration is unbearable. UserDefaults is an acceptable tradeoff here:
-- The token is scoped to a single scrt.link account that the user can rotate
-- UserDefaults and Keychain are both unlocked by the same user session
-- No secrets less sensitive than an account-scoped API token are stored
-
-The file is still named `KeychainStore.swift` to avoid a rename-cascade; it documents the swap at the top.
+Developer ID releases have a stable signing identity, so the account-scoped bearer token lives in macOS Keychain. The first read migrates a token from older `UserDefaults` storage only after a successful Keychain write. Local ad hoc builds may prompt for Keychain access after a rebuild because their signing identity is not stable.
 
 ### 6. Secret ↔ link model; why we don't store plaintext
 
@@ -127,7 +124,7 @@ scrt.link-mac-app/
 │   ├── ScrtLinkAPI.swift            Hidden WebView + Swift↔JS bridge
 │   ├── PreferencesWindow.swift      Preferences panel
 │   ├── Preferences.swift            Simple toggle storage (useWebUI)
-│   ├── KeychainStore.swift          API token storage (UserDefaults despite name)
+│   ├── KeychainStore.swift          API token storage and legacy migration
 │   ├── BrandStyle.swift             Brand colors + button styling helpers
 │   ├── DockManager.swift            Show/hide Dock toggle
 │   └── UpdateManager.swift          GitHub Releases auto-updater
@@ -142,6 +139,7 @@ scrt.link-mac-app/
 │   ├── test-autoupdate.sh
 │   └── README.md
 ├── build.sh
+├── package.sh                       Release ZIP without AppleDouble entries
 ├── release.sh
 └── README.md
 ```
@@ -151,7 +149,7 @@ scrt.link-mac-app/
 1. 3 seconds after launch (and on-demand via menu), `UpdateManager.checkForUpdatesInBackground()` hits `api.github.com/repos/mikezielonkadotcom/scrt.link-mac-app/releases/latest`.
 2. Compares `tag_name` (minus `v` prefix) against `CFBundleShortVersionString` via a numeric dotted-version compare.
 3. If newer, prompts the user with release notes and download / defer buttons.
-4. On accept: downloads the `.zip` asset, unzips to a temp dir, moves the current `.app` to a backup location, copies the new one in, clears `com.apple.quarantine` xattr, and relaunches via `/usr/bin/open -n`.
+4. On accept: downloads the exact versioned ZIP, extracts it to a temp dir, checks the bundle ID, version, pinned Apple Developer team, signature, and Gatekeeper assessment, then stages it beside the installed app. The old app moves to a hidden backup beside the installed app before relaunch. If installation or LaunchServices fails, the updater attempts to restore the backup and reports any rollback failure. It keeps the backup after a successful relaunch for manual recovery.
 
 This only works because the repo is **public** — `/releases/latest` returns 404 for private repos without authentication, which silently no-ops the check.
 
