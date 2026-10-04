@@ -144,6 +144,26 @@ Raw `swiftc` — no Xcode project, no SwiftPM.
 
 ## Release
 
+### GitHub Actions (recommended)
+
+Open [Signed Mac release](https://github.com/mikezielonkadotcom/scrt.link-mac-app/actions/workflows/signed-release.yml), choose **Run workflow** on `main`, enter the version matching both fields in `Resources/Info.plist`, and select **publish** to create a new release. Leave publish off to test signing and download the verified ZIP as a workflow artifact without changing any release. Existing release tags cannot be overwritten.
+
+The workflow runs the regression suite on an Apple silicon macOS runner, then signs on a fresh runner with the Developer ID identity, notarizes with Apple, staples the ticket, and checks both updater extraction paths with Gatekeeper. Publishing is a separate job with write permission; it verifies the signed ZIP's SHA256 before uploading it and confirms the public asset hash and tag afterward. A failed test, signature, notarization, or archive check stops publication.
+
+Signing uses these encrypted **environment secrets** in `apple-signing`:
+
+| Secret | Value |
+| --- | --- |
+| `APPLE_CERTIFICATE_P12_BASE64` | Base64 of an encrypted PKCS#12 containing the Developer ID certificate, private key, and intermediate certificate |
+| `APPLE_CERTIFICATE_PASSWORD` | Password protecting that PKCS#12 |
+| `APPLE_NOTARY_PASSWORD` | Apple app-specific password for notarization |
+
+Restrict that environment to the `main` branch. The workflow also rejects other branches and forks. Secrets are loaded only after tests, imported into a disposable runner Keychain, and removed after the job. The signing password never goes in command arguments, logs, or artifacts. All third-party Actions are pinned to commit SHAs. No private key or password belongs in the public repository.
+
+The team ID, Apple account, and Developer ID identity are configured in the workflow. Replace the environment secrets when the signing certificate or notarization credential changes. GitHub-hosted signing does not require the Mac Studio to be online.
+
+### Local release
+
 Set both version fields in `Resources/Info.plist` first. Install a Developer ID Application certificate with its private key in your login Keychain and store notarization credentials with `xcrun notarytool store-credentials`. Then:
 
 ```bash
@@ -154,6 +174,8 @@ NOTARY_PROFILE=scrt-link \
 ```
 
 The script builds, signs with hardened runtime, verifies the pinned team and bundle ID, notarizes, staples, and packages `.build/ScrtLink-v1.6.1.zip` with `package.sh`. It stops on any failure. To publish after review, run the same command from a clean `main` checkout with `--publish`.
+
+`NOTARY_KEYCHAIN` optionally selects a specific Keychain containing the notarization profile; GitHub Actions uses this for its temporary Keychain. Local releases normally omit it.
 
 ## Tests
 

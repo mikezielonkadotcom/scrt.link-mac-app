@@ -59,7 +59,11 @@ REQUIREMENT="anchor apple generic and certificate leaf[subject.OU] = \"$TEAM_ID\
 codesign --verify --deep --strict -R="$REQUIREMENT" "$APP_BUNDLE"
 
 ./package.sh "$APP_BUNDLE" "$ZIP_FILE"
-xcrun notarytool submit "$ZIP_FILE" --keychain-profile "$NOTARY_PROFILE" --wait
+NOTARY_OPTIONS=(--keychain-profile "$NOTARY_PROFILE")
+if [[ -n "${NOTARY_KEYCHAIN:-}" ]]; then
+    NOTARY_OPTIONS+=(--keychain "$NOTARY_KEYCHAIN")
+fi
+xcrun notarytool submit "$ZIP_FILE" "${NOTARY_OPTIONS[@]}" --wait
 xcrun stapler staple "$APP_BUNDLE"
 xcrun stapler validate "$APP_BUNDLE"
 spctl --assess --type execute --verbose "$APP_BUNDLE"
