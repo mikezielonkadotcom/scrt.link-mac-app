@@ -1,0 +1,161 @@
+name: Signed Mac release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version matching both Info.plist fields (for example 1.6.1)
+        required: true
+        type: string
+      publish:
+        description: Publish a new GitHub release after verification
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: signed-mac-release
+  cancel-in-progress: false
+
+jobs:
+  test:
+    if: github.repository == 'mikezielonkadotcom/scrt.link-mac-app' && github.ref == 'refs/heads/main'
+    runs-on: macos-15
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Run regression tests without signing access
+        run: |
+          set -euo pipefail
+          ./tests/test-history-store.sh
+          ./tests/test-ui-layout.sh
+          ./tests/test-keychain-store.sh
+          ./tests/test-scrtlink-api.sh
+          ./tests/test-release-archive.sh
+
+  sign:
+    needs: test
+    if: github.repository == 'mikezielonkadotcom/scrt.link-mac-app' && github.ref == 'refs/heads/main'
+    runs-on: macos-15
+    timeout-minutes: 30
+    environment: apple-signing
+    outputs:
+      artifact_id: ${{ steps.upload.outputs.artifact-id }}
+      zip_sha256: ${{ steps.verify.outputs.sha256 }}
+    env:
+      VERSION: ${{ inputs.version }}
+      TEAM_ID: LTB247PXZ7
+      DEVELOPER_ID: 'Developer ID Application: Michael Zielonka (LTB247PXZ7)'
+      NOTARY_PROFILE: scrt-link-ci
+    steps:
+      - name: Check out the requested main commit
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Validate version and runner
+        env:
+          PUBLISH: ${{ inputs.publish }}
+        run: |
+          set -euo pipefail
+          echo "NOTARY_KEYCHAIN=$RUNNER_TEMP/scrt-link-signing.keychain-db" >> "$GITHUB_ENV"
+          [[ "$(uname -m)" == arm64 ]]
+          [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          [[ "$(plutil -extract CFBundleShortVersionString raw Resources/Info.plist)" == "$VERSION" ]]
+          [[ "$(plutil -extract CFBundleVersion raw Resources/Info.plist)" == "$VERSION" ]]
+          if [[ "$PUBLISH" == true ]]; then
+            [[ -z "$(git ls-remote --tags origin "refs/tags/v$VERSION")" ]] || {
+              echo 'The release tag already exists; use a new version.' >&2
+              exit 1
+            }
+          fi
+
+      - name: Prepare temporary signing Keychain
+        env:
+          APPLE_CERTIFICATE_P12_BASE64: ${{ secrets.APPLE_CERTIFICATE_P12_BASE64 }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_NOTARY_PASSWORD: ${{ secrets.APPLE_NOTARY_PASSWORD }}
+          APPLE_ID: me@mikezielonka.com
+        run: python3 scripts/ci-signing.py
+
+      - name: Sign, notarize, staple, and package
+        run: ./release.sh "$VERSION"
+
+      - name: Verify the distributable archive
+        id: verify
+        run: |
+          set -euo pipefail
+          ZIP=".build/ScrtLink-v$VERSION.zip"
+          REQUIREMENT="anchor apple generic and certificate leaf[subject.OU] = \"$TEAM_ID\" and identifier \"com.mikezielonka.scrt-link\""
+          WORK="$(mktemp -d "$RUNNER_TEMP/scrt-link-verify.XXXXXX")"
+          trap 'rm -rf "$WORK"' EXIT
+          mkdir "$WORK/legacy" "$WORK/current"
+          unzip -q -o "$ZIP" -d "$WORK/legacy"
+          xattr -cr "$WORK/legacy/ScrtLink.app"
+          ditto -x -k "$ZIP" "$WORK/current"
+          for APP in "$WORK/legacy/ScrtLink.app" "$WORK/current/ScrtLink.app"; do
+            codesign --verify --deep --strict -R="$REQUIREMENT" "$APP"
+            xcrun stapler validate "$APP"
+            spctl --assess --type execute --verbose=2 "$APP"
+            [[ "$(plutil -extract CFBundleShortVersionString raw "$APP/Contents/Info.plist")" == "$VERSION" ]]
+          done
+          SHA="$(shasum -a 256 "$ZIP" | awk '{print $1}')"
+          echo "sha256=$SHA" >> "$GITHUB_OUTPUT"
+          printf 'Signed and notarized version: %s\nSource: %s\nSHA256: %s\n' "$VERSION" "$GITHUB_SHA" "$SHA" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload only the verified ZIP
+        id: upload
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ScrtLink-v${{ inputs.version }}
+          path: .build/ScrtLink-v${{ inputs.version }}.zip
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+
+      - name: Remove signing credentials
+        if: always()
+        run: |
+          security delete-keychain "${NOTARY_KEYCHAIN:-$RUNNER_TEMP/scrt-link-signing.keychain-db}" 2>/dev/null || true
+          rm -f "$RUNNER_TEMP/scrt-link-certificate.p12"
+
+  publish:
+    needs: sign
+    if: inputs.publish && github.repository == 'mikezielonkadotcom/scrt.link-mac-app' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: read
+      contents: write
+    steps:
+      - name: Download this run's verified artifact
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          artifact-ids: ${{ needs.sign.outputs.artifact_id }}
+          path: release
+          merge-multiple: true
+
+      - name: Publish after verifying the artifact hash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          VERSION: ${{ inputs.version }}
+          EXPECTED_SHA: ${{ needs.sign.outputs.zip_sha256 }}
+        run: |
+          set -euo pipefail
+          [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          ZIP="release/ScrtLink-v$VERSION.zip"
+          [[ "$(sha256sum "$ZIP" | awk '{print $1}')" == "$EXPECTED_SHA" ]]
+          printf 'Developer ID signed, Apple notarized, and stapled.\n\nSource: %s\nSHA256: %s\n\nApple silicon, macOS 14 or later.\n' "$GITHUB_SHA" "$EXPECTED_SHA" > release/notes.md
+          gh release create "v$VERSION" "$ZIP" --repo "$GH_REPO" --target "$GITHUB_SHA" --title "v$VERSION" --notes-file release/notes.md --latest
+          TAG_SHA="$(gh api "repos/$GH_REPO/git/ref/tags/v$VERSION" --jq .object.sha)"
+          [[ "$TAG_SHA" == "$GITHUB_SHA" ]]
+          DIGEST="$(gh release view "v$VERSION" --repo "$GH_REPO" --json assets --jq '.assets[0].digest')"
+          [[ "$DIGEST" == "sha256:$EXPECTED_SHA" ]]
+          gh release view "v$VERSION" --repo "$GH_REPO" --json url --jq .url >> "$GITHUB_STEP_SUMMARY"
