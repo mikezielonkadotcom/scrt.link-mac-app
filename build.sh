@@ -27,6 +27,7 @@ swiftc \
   Sources/WebViewController.swift \
   Sources/PreferencesWindow.swift \
   Sources/UpdateManager.swift \
+  Sources/SecurePasteboard.swift \
   -o "$APP_BUNDLE/Contents/MacOS/$APP" \
   -framework AppKit \
   -framework WebKit \
@@ -34,7 +35,8 @@ swiftc \
   -framework Security \
   -framework Carbon \
   -target arm64-apple-macosx14.0 \
-  -swift-version 6
+  -swift-version 6 \
+  -O -wmo
 
 cp Resources/Info.plist "$APP_BUNDLE/Contents/"
 cp Resources/AppIcon.icns "$APP_BUNDLE/Contents/Resources/" 2>/dev/null || true

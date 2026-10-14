@@ -236,9 +236,7 @@ final class NativeSecretFormView: NSView {
     }
 
     private func copyToClipboard(_ s: String) {
-        let pb = NSPasteboard.general
-        pb.clearContents()
-        pb.setString(s, forType: .string)
+        SecurePasteboard.copy(s)
     }
 
     private func flashStatus(_ message: String, isError: Bool) {

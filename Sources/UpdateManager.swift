@@ -110,62 +110,116 @@ class UpdateManager {
         window.contentView?.addSubview(progress)
         window.makeKeyAndOrderFront(nil)
 
-        let task = URLSession.shared.downloadTask(with: url) { [weak self] tempURL, response, error in
+        let task = URLSession.shared.downloadTask(with: url) { [weak self] tempURL, _, error in
+            // URLSession deletes its temp file once this handler returns, so
+            // claim the download here, on the session's background queue,
+            // before hopping to the main actor.
+            let claimed: Result<(zip: URL, dir: URL), Error>
+            if let error {
+                claimed = .failure(error)
+            } else if let tempURL {
+                claimed = Result { try Self.claimDownload(tempURL) }
+            } else {
+                claimed = .failure(UpdateInstallError.failed("No file was downloaded."))
+            }
+
             DispatchQueue.main.async { @MainActor in
-                window.close()
-
-                if let error = error {
+                switch claimed {
+                case .failure(let error):
+                    window.close()
                     self?.showAlert(title: "Download Failed", message: error.localizedDescription)
-                    return
+                case .success(let download):
+                    label.stringValue = "Verifying update v\(version)..."
+                    self?.installUpdate(zipURL: download.zip, tempDir: download.dir, version: version,
+                                        progressWindow: window)
                 }
-
-                guard let tempURL = tempURL else {
-                    self?.showAlert(title: "Download Failed", message: "No file was downloaded.")
-                    return
-                }
-
-                self?.installUpdate(from: tempURL, version: version)
             }
         }
         task.resume()
     }
 
-    private func installUpdate(from zipURL: URL, version: String) {
+    /// Unpacks, stages and verifies the update off the main actor while the
+    /// progress window stays up, then swaps the bundle into place on the main
+    /// actor. Before this split the whole install (ditto, codesign, spctl and
+    /// a copy of the entire .app) blocked the UI with no window explaining why.
+    private func installUpdate(zipURL: URL, tempDir: URL, version: String, progressWindow: NSWindow) {
+        let currentAppURL = Bundle.main.bundleURL
+        let teamID = Bundle.main.object(forInfoDictionaryKey: "ScrtLinkTeamID") as? String
+        let bundleID = Bundle.main.bundleIdentifier
+
+        Task { [weak self] in
+            let staged = await Task.detached(priority: .userInitiated) {
+                Result { try Self.stageUpdate(zipURL: zipURL, tempDir: tempDir, version: version,
+                                              currentAppURL: currentAppURL, teamID: teamID, bundleID: bundleID) }
+            }.value
+
+            guard let self else { progressWindow.close(); return }
+            switch staged {
+            case .failure(UpdateInstallError.rejected):
+                progressWindow.close()
+                self.showAlert(title: "Update Rejected", message: "The update did not pass app identity and Apple signature checks. Download it manually from the project release page if needed.")
+            case .failure(let error):
+                progressWindow.close()
+                self.showAlert(title: "Update Failed", message: error.localizedDescription)
+            case .success(let stagedURL):
+                self.swapInStagedUpdate(stagedURL, currentAppURL: currentAppURL, progressWindow: progressWindow)
+            }
+        }
+    }
+
+    /// Copies URLSession's temporary download into a private working
+    /// directory. Returns the ZIP and the directory to clean up.
+    nonisolated private static func claimDownload(_ tempURL: URL) throws -> (zip: URL, dir: URL) {
         let fileManager = FileManager.default
         let tempDir = fileManager.temporaryDirectory.appendingPathComponent("ScrtLink-update-\(UUID().uuidString)")
+        try fileManager.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        let zipDest = tempDir.appendingPathComponent("update.zip")
+        do {
+            try fileManager.copyItem(at: tempURL, to: zipDest)
+        } catch {
+            try? fileManager.removeItem(at: tempDir)
+            throw error
+        }
+        return (zipDest, tempDir)
+    }
+
+    /// Extracts the ZIP, copies the bundle to a staged path beside the
+    /// installed app, and verifies that staged copy: the exact bytes that will
+    /// be moved into place, not the extraction in the temp directory. Removes
+    /// the temp directory on every path and the staged copy on failure.
+    nonisolated private static func stageUpdate(zipURL: URL, tempDir: URL, version: String,
+                                                currentAppURL: URL, teamID: String?, bundleID: String?) throws -> URL {
+        let fileManager = FileManager.default
+        defer { try? fileManager.removeItem(at: tempDir) }
+
+        guard run("/usr/bin/ditto", ["-x", "-k", zipURL.path, tempDir.path]) else {
+            throw UpdateInstallError.failed("Could not unzip the update package.")
+        }
+
+        let newApp = tempDir.appendingPathComponent("ScrtLink.app")
+        guard fileManager.fileExists(atPath: newApp.path),
+              newApp.resolvingSymlinksInPath().path.hasPrefix(tempDir.resolvingSymlinksInPath().path + "/") else {
+            throw UpdateInstallError.failed("No .app found in the update package.")
+        }
+
+        let stagedURL = currentAppURL.deletingLastPathComponent()
+            .appendingPathComponent(".ScrtLink-update-\(UUID().uuidString).app")
+        try fileManager.copyItem(at: newApp, to: stagedURL)
+
+        guard verifyUpdate(stagedURL, version: version, teamID: teamID, bundleID: bundleID) else {
+            try? fileManager.removeItem(at: stagedURL)
+            throw UpdateInstallError.rejected
+        }
+        return stagedURL
+    }
+
+    /// The two renames and the relaunch. Fast, so they stay on the main actor.
+    private func swapInStagedUpdate(_ stagedURL: URL, currentAppURL: URL, progressWindow: NSWindow) {
+        let fileManager = FileManager.default
+        let backupURL = currentAppURL.deletingLastPathComponent()
+            .appendingPathComponent(".ScrtLink-backup-\(UUID().uuidString).app")
 
         do {
-            try fileManager.createDirectory(at: tempDir, withIntermediateDirectories: true)
-            defer { try? fileManager.removeItem(at: tempDir) }
-
-            let zipDest = tempDir.appendingPathComponent("update.zip")
-            try fileManager.copyItem(at: zipURL, to: zipDest)
-
-            guard Self.run("/usr/bin/ditto", ["-x", "-k", zipDest.path, tempDir.path]) else {
-                showAlert(title: "Update Failed", message: "Could not unzip the update package.")
-                return
-            }
-
-            let newApp = tempDir.appendingPathComponent("ScrtLink.app")
-            guard fileManager.fileExists(atPath: newApp.path),
-                  newApp.resolvingSymlinksInPath().path.hasPrefix(tempDir.path + "/") else {
-                showAlert(title: "Update Failed", message: "No .app found in the update package.")
-                return
-            }
-
-            guard Self.verifyUpdate(newApp, version: version,
-                                    teamID: Bundle.main.object(forInfoDictionaryKey: "ScrtLinkTeamID") as? String,
-                                    bundleID: Bundle.main.bundleIdentifier) else {
-                showAlert(title: "Update Rejected", message: "The update did not pass app identity and Apple signature checks. Download it manually from the project release page if needed.")
-                return
-            }
-
-            let currentAppURL = Bundle.main.bundleURL
-            let stagedURL = currentAppURL.deletingLastPathComponent()
-                .appendingPathComponent(".ScrtLink-update-\(UUID().uuidString).app")
-            let backupURL = currentAppURL.deletingLastPathComponent()
-                .appendingPathComponent(".ScrtLink-backup-\(UUID().uuidString).app")
-            try fileManager.copyItem(at: newApp, to: stagedURL)
             do {
                 try fileManager.moveItem(at: currentAppURL, to: backupURL)
                 do {
@@ -198,9 +252,11 @@ class UpdateManager {
             // confirms LaunchServices accepted the new app, not that its UI
             // will keep running. Never discard the backup in this process.
 
+            progressWindow.close()
             NSApp.terminate(nil)
 
         } catch {
+            progressWindow.close()
             showAlert(title: "Update Failed", message: error.localizedDescription)
         }
     }
@@ -294,5 +350,20 @@ class UpdateManager {
         alert.informativeText = message
         alert.addButton(withTitle: "OK")
         alert.runModal()
+    }
+}
+
+/// Outcomes of staging an update that need distinct user-facing alerts.
+enum UpdateInstallError: LocalizedError {
+    /// A step failed; the message is shown as-is.
+    case failed(String)
+    /// The bundle did not pass the identity, team, signature or Gatekeeper gates.
+    case rejected
+
+    var errorDescription: String? {
+        switch self {
+        case .failed(let message): return message
+        case .rejected: return "The update did not pass app identity and Apple signature checks."
+        }
     }
 }

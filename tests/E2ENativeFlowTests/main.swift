@@ -52,6 +52,13 @@ defaults.removePersistentDomain(forName: defaultsDomain)
 let clipboard = NSPasteboard.general
 let savedClipboard = clipboard.string(forType: .string)
 
+/// Every copy of a bearer link must also declare org.nspasteboard.ConcealedType
+/// so clipboard managers skip it (audit S4).
+func isConcealed(_ pb: NSPasteboard) -> Bool {
+    pb.types?.contains(SecurePasteboard.concealedType) == true
+        && pb.string(forType: SecurePasteboard.concealedType) != nil
+}
+
 // MARK: - Test helpers
 
 var failures = 0
@@ -164,6 +171,29 @@ let workingHarness = realHarness.replacingOccurrences(of: moduleURL, with: "data
 
 print("▸ Fixture")
 check(realHarness.contains("'\(moduleURL)'"), "real harness imports the scrt.link client module")
+
+// Embedded web UI trust boundary (audit S1, S2): exact host match and a
+// web-only scheme allowlist for anything handed to the default browser.
+print("▸ Web view trust boundary")
+check(WebViewController.isTrustedHost("scrt.link", customHost: ""), "scrt.link is trusted")
+check(WebViewController.isTrustedHost("SCRT.LINK", customHost: ""), "host comparison ignores case")
+check(WebViewController.isTrustedHost("app.scrt.link", customHost: ""), "subdomains of scrt.link are trusted")
+check(!WebViewController.isTrustedHost("scrt.link.example.com", customHost: ""), "scrt.link.example.com is not trusted")
+check(!WebViewController.isTrustedHost("notscrt.link", customHost: ""), "notscrt.link is not trusted")
+check(!WebViewController.isTrustedHost("scrt.linkattacker.com", customHost: ""), "scrt.linkattacker.com is not trusted")
+check(!WebViewController.isTrustedHost(nil, customHost: ""), "a URL without a host is not trusted")
+check(WebViewController.isTrustedHost("secrets.example.com", customHost: " Secrets.Example.com "),
+      "the configured custom host is trusted")
+check(!WebViewController.isTrustedHost("secrets.example.com", customHost: ""), "a custom host is only trusted when configured")
+check(!WebViewController.isTrustedHost("example.com", customHost: "secrets.example.com"), "the custom host's parent domain is not trusted")
+for bad in ["tel:+15555550100", "file:///etc/hosts", "x-apple.systempreferences:com.apple.preference.security",
+            "javascript:alert(1)", "mailto:a@b.c", "custom-scheme://payload", "http:", "https://"] {
+    if let url = URL(string: bad) {
+        check(!WebViewController.openInBrowser(url), "\(bad) is never handed to NSWorkspace")
+    } else {
+        check(true, "\(bad) does not even parse as a URL")
+    }
+}
 
 @MainActor
 func makeAPI(token: String) -> ScrtLinkAPI {
@@ -315,6 +345,7 @@ if let call = FakeCall(link: firstLink) {
 check(statusLabel.stringValue == "Link copied to clipboard", "status: \(statusLabel.stringValue)")
 check(statusLabel.textColor == .secondaryLabelColor, "status is not an error")
 check(clipboard.string(forType: .string) == firstLink, "the link is on the clipboard")
+check(isConcealed(clipboard), "the auto-copied link is marked concealed for clipboard managers")
 check(textView.string.isEmpty, "secret text is cleared after success")
 check(passwordField.stringValue.isEmpty, "password is cleared after success")
 check(noteField.stringValue.isEmpty, "note is cleared after success")
@@ -346,6 +377,7 @@ if let card = cardStack.arrangedSubviews.first {
     clipboard.clearContents()
     button(titled: "Copy", in: card)?.performClick(nil)
     check(clipboard.string(forType: .string) == firstLink, "card's Copy puts the link on the clipboard")
+    check(isConcealed(clipboard), "card's Copy marks the link concealed for clipboard managers")
 }
 
 print("")
@@ -451,6 +483,7 @@ check(copyLinkButton.isEnabled, "Copy Link enables on selection")
 clipboard.clearContents()
 copyLinkButton.performClick(nil)
 check(clipboard.string(forType: .string) == firstLink, "Copy Link copies the selected row's link")
+check(isConcealed(clipboard), "Copy Link marks the link concealed for clipboard managers")
 
 searchField.stringValue = "board"
 searchField.delegate?.controlTextDidChange?(Notification(name: NSControl.textDidChangeNotification, object: searchField))

@@ -490,9 +490,7 @@ private final class HistoryCardView: NSView {
     }
 
     @objc private func copyTapped() {
-        let pb = NSPasteboard.general
-        pb.clearContents()
-        pb.setString(entry.link, forType: .string)
+        SecurePasteboard.copy(entry.link)
     }
 
     @objc private func openTapped() {
