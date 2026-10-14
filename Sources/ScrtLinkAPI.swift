@@ -9,7 +9,9 @@ import WebKit
 /// subsequent fetches to `https://scrt.link/api/v1/secrets` are same-origin.
 @MainActor
 class ScrtLinkAPI: NSObject {
-    static let shared = ScrtLinkAPI()
+    /// The app-wide instance. Tests replace it with an offline instance whose
+    /// harness has the scrt.link client module swapped for a local fake.
+    static var shared = ScrtLinkAPI()
 
     struct SecretResult {
         let secretLink: String

@@ -36,6 +36,8 @@ jobs:
           ./tests/test-ui-layout.sh
           ./tests/test-keychain-store.sh
           ./tests/test-scrtlink-api.sh
+          ./tests/test-e2e-native-flow.sh
+          ./tests/test-update-verification.sh
           ./tests/test-release-archive.sh
 
   sign:

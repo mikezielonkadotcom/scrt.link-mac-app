@@ -184,6 +184,8 @@ The script builds, signs with hardened runtime, verifies the pinned team and bun
 ./tests/test-ui-layout.sh       # sidebar + Secret Log view tree (headless)
 ./tests/test-keychain-store.sh  # token storage + legacy migration (throwaway Keychain item)
 ./tests/test-scrtlink-api.sh    # secret-creation bridge, offline fake module (headless)
+./tests/test-e2e-native-flow.sh # real window + form + sidebar + log, driven end to end (headless)
+./tests/test-update-verification.sh # updater's version, URL and signature gates (headless)
 ./tests/test-release-archive.sh # release ZIP survives both updaters' extraction
 ./tests/smoke.sh                # build + launch + UI probe (28+ checks)
 ./tests/test-autoupdate.sh      # end-to-end auto-update flow

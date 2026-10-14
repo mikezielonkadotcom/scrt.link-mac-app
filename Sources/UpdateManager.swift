@@ -64,7 +64,7 @@ class UpdateManager {
 
         let remoteVersion = tagName.hasPrefix("v") ? String(tagName.dropFirst()) : tagName
 
-        if isNewerVersion(remote: remoteVersion, current: currentVersion) {
+        if Self.isNewerVersion(remote: remoteVersion, current: currentVersion) {
             let body = json["body"] as? String ?? ""
             promptForUpdate(version: remoteVersion, releaseNotes: body, assets: json["assets"] as? [[String: Any]] ?? [])
         } else if !silent {
@@ -73,13 +73,8 @@ class UpdateManager {
     }
 
     private func promptForUpdate(version: String, releaseNotes: String, assets: [[String: Any]]) {
-        let expectedName = "ScrtLink-v\(version).zip"
-        guard let asset = assets.first(where: { ($0["name"] as? String) == expectedName }),
-              let downloadURLString = asset["browser_download_url"] as? String,
-              let downloadURL = URL(string: downloadURLString),
-              downloadURL.scheme == "https",
-              downloadURL.host == "github.com",
-              downloadURL.path == "/\(repoOwner)/\(repoName)/releases/download/v\(version)/\(expectedName)" else {
+        guard let downloadURL = Self.releaseDownloadURL(version: version, assets: assets,
+                                                        repoOwner: repoOwner, repoName: repoName) else {
             showAlert(title: "Update Available (v\(version))", message: "A new version is available but no downloadable package was found.\n\nPlease update manually from GitHub.")
             return
         }
@@ -146,7 +141,7 @@ class UpdateManager {
             let zipDest = tempDir.appendingPathComponent("update.zip")
             try fileManager.copyItem(at: zipURL, to: zipDest)
 
-            guard run("/usr/bin/ditto", ["-x", "-k", zipDest.path, tempDir.path]) else {
+            guard Self.run("/usr/bin/ditto", ["-x", "-k", zipDest.path, tempDir.path]) else {
                 showAlert(title: "Update Failed", message: "Could not unzip the update package.")
                 return
             }
@@ -158,7 +153,9 @@ class UpdateManager {
                 return
             }
 
-            guard verifyUpdate(newApp, version: version) else {
+            guard Self.verifyUpdate(newApp, version: version,
+                                    teamID: Bundle.main.object(forInfoDictionaryKey: "ScrtLinkTeamID") as? String,
+                                    bundleID: Bundle.main.bundleIdentifier) else {
                 showAlert(title: "Update Rejected", message: "The update did not pass app identity and Apple signature checks. Download it manually from the project release page if needed.")
                 return
             }
@@ -187,7 +184,7 @@ class UpdateManager {
                 throw error
             }
 
-            guard run("/usr/bin/open", ["-n", currentAppURL.path]) else {
+            guard Self.run("/usr/bin/open", ["-n", currentAppURL.path]) else {
                 do {
                     try fileManager.removeItem(at: currentAppURL)
                     try fileManager.moveItem(at: backupURL, to: currentAppURL)
@@ -213,23 +210,51 @@ class UpdateManager {
                 userInfo: [NSLocalizedDescriptionKey: message])
     }
 
-    private func verifyUpdate(_ app: URL, version: String) -> Bool {
-        guard let teamID = Bundle.main.object(forInfoDictionaryKey: "ScrtLinkTeamID") as? String,
-              !teamID.isEmpty,
+    // MARK: - Release gates
+    //
+    // These are static and take their inputs explicitly so the offline test
+    // suite (tests/UpdateManagerTests) can exercise them against a real
+    // bundle without an installed app, a network connection, or an alert.
+
+    /// The only download URL the updater will fetch for `version`: the exact
+    /// versioned ZIP on github.com under this repository's releases path.
+    /// Anything else, including a lookalike host or a different repository,
+    /// yields nil and the user is sent to the release page instead.
+    nonisolated static func releaseDownloadURL(version: String, assets: [[String: Any]],
+                                               repoOwner: String, repoName: String) -> URL? {
+        let expectedName = "ScrtLink-v\(version).zip"
+        guard let asset = assets.first(where: { ($0["name"] as? String) == expectedName }),
+              let downloadURLString = asset["browser_download_url"] as? String,
+              let downloadURL = URL(string: downloadURLString),
+              downloadURL.scheme == "https",
+              downloadURL.host == "github.com",
+              downloadURL.user == nil, downloadURL.port == nil,
+              downloadURL.path == "/\(repoOwner)/\(repoName)/releases/download/v\(version)/\(expectedName)" else {
+            return nil
+        }
+        return downloadURL
+    }
+
+    /// Identity, version, pinned Apple team, signature and Gatekeeper checks
+    /// for a candidate bundle. `teamID` is the value sealed into the running
+    /// app's Info.plist by release.sh; without a valid one (local ad hoc
+    /// builds) no update is ever installed.
+    nonisolated static func verifyUpdate(_ app: URL, version: String, teamID: String?, bundleID: String?) -> Bool {
+        guard let teamID, !teamID.isEmpty,
               teamID.range(of: "^[A-Z0-9]{10}$", options: .regularExpression) != nil,
+              let bundleID, !bundleID.isEmpty,
               let bundle = Bundle(url: app),
-              bundle.bundleIdentifier == Bundle.main.bundleIdentifier,
+              bundle.bundleIdentifier == bundleID,
               bundle.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String == version else {
             return false
         }
 
-        let bundleID = Bundle.main.bundleIdentifier ?? ""
         let requirement = "anchor apple generic and certificate leaf[subject.OU] = \"\(teamID)\" and identifier \"\(bundleID)\""
         return run("/usr/bin/codesign", ["--verify", "--strict", "--deep", "-R=\(requirement)", app.path])
             && run("/usr/sbin/spctl", ["--assess", "--type", "execute", app.path])
     }
 
-    private func run(_ executable: String, _ arguments: [String]) -> Bool {
+    nonisolated static func run(_ executable: String, _ arguments: [String]) -> Bool {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: executable)
         process.arguments = arguments
@@ -246,7 +271,9 @@ class UpdateManager {
 
     // MARK: - Version Comparison
 
-    private func isNewerVersion(remote: String, current: String) -> Bool {
+    /// Numeric dotted comparison ("1.10.0" is newer than "1.9.9"). Missing
+    /// components count as 0 and non-numeric components are ignored.
+    nonisolated static func isNewerVersion(remote: String, current: String) -> Bool {
         let remoteParts = remote.split(separator: ".").compactMap { Int($0) }
         let currentParts = current.split(separator: ".").compactMap { Int($0) }
 
