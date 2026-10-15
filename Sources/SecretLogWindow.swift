@@ -340,9 +340,7 @@ final class SecretLogWindow: NSObject {
     private func copy(_ entries: [SecretEntry]) {
         let links = entries.map(\.link)
         guard !links.isEmpty else { return }
-        let pb = NSPasteboard.general
-        pb.clearContents()
-        pb.setString(links.joined(separator: "\n"), forType: .string)
+        SecurePasteboard.copy(links.joined(separator: "\n"))
     }
 
     private func open(_ entries: [SecretEntry]) {

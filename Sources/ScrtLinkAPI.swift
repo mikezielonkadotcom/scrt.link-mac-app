@@ -9,7 +9,9 @@ import WebKit
 /// subsequent fetches to `https://scrt.link/api/v1/secrets` are same-origin.
 @MainActor
 class ScrtLinkAPI: NSObject {
-    static let shared = ScrtLinkAPI()
+    /// The app-wide instance. Tests replace it with an offline instance whose
+    /// harness has the scrt.link client module swapped for a local fake.
+    static var shared = ScrtLinkAPI()
 
     struct SecretResult {
         let secretLink: String
@@ -71,10 +73,15 @@ class ScrtLinkAPI: NSObject {
         ucc.add(ScriptMessageRelay(owner: self), name: "scrtReady")
         ucc.add(ScriptMessageRelay(owner: self), name: "scrtResult")
         ucc.add(ScriptMessageRelay(owner: self), name: "scrtLog")
-        // Allow Safari Web Inspector to attach for debugging.
+        // Allow Safari Web Inspector to attach for debugging. Debug builds
+        // only (swiftc -D DEBUG): the harness holds the bearer token and the
+        // plaintext secret in JavaScript scope during a create, and a release
+        // build should not expose that surface to the inspection protocol.
+        #if DEBUG
         if webView.responds(to: Selector(("setInspectable:"))) {
             webView.perform(Selector(("setInspectable:")), with: NSNumber(value: true))
         }
+        #endif
         loadHarness()
     }
 

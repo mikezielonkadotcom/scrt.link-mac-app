@@ -58,6 +58,7 @@ required_sources=(
     "Sources/ShortcutRecorderView.swift"
     "Sources/ScrtLinkAPI.swift"
     "Sources/NativeSecretFormView.swift"
+    "Sources/SecurePasteboard.swift"
     "Resources/Info.plist"
     "Resources/AppIcon.icns"
     "Resources/StatusBarIcon.png"

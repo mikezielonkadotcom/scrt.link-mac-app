@@ -60,6 +60,26 @@ Compiles `Sources/ScrtLinkAPI.swift` (plus `KeychainStore.swift` and `Preference
 
 Builds the app ad hoc, gives every file an extended attribute (macOS adds `com.apple.provenance` to built files), archives it with `package.sh`, and extracts it the way both in-app updaters do: `unzip -o` plus `xattr -cr` (1.6.0 and earlier) and `ditto -x -k` (1.6.1 and later). Each extracted bundle must pass `codesign --verify --deep --strict`. A control archive made without `--norsrc` must break the `unzip` path, proving the test detects the AppleDouble `._*` files that would otherwise land inside the bundle. No signing identity, network, Keychain, or app launch needed.
 
-## Why not XCUITest / full e2e?
+## End-to-end native flow test
 
-This is a thin WKWebView wrapper around scrt.link. The interesting behavior (creating a secret, encrypting client-side) lives in their web app, not ours. Full UI e2e would mostly be testing them, and would break whenever they redesign the form. The smoke test above covers ~90% of real regressions for a small AppKit wrapper.
+```bash
+./tests/test-e2e-native-flow.sh
+```
+
+Compiles every app source except `main.swift` with `tests/E2ENativeFlowTests/main.swift`, then builds the **real** main window (`WebViewController`: split view, `HistorySidebarView`, `NativeSecretFormView`) and the real `SecretLogWindow`, and drives them the way a user does. It installs an offline `ScrtLinkAPI` whose harness is the real `Resources/harness.html` with only the scrt.link client-module import swapped for an inline fake that echoes the text and options it received into the link.
+
+Covers, in order: the empty state and footer actions; an empty secret; a missing token; a text secret with password and note (busy state, result card, clipboard, cleared fields, stored entry with parsed `expiresAt`, sidebar card, card Copy); the diagnostic report omitting text, password, token and link; a redirect on a custom domain with a 7-day expiry; an API failure that keeps the text and logs nothing; the Services-menu prefill forcing the native form (preference flipped, text prefilled and selected, focus); the Secret Log window (rows, no link rendered, selection-driven Copy Link, filter and count label, Delete propagating to the sidebar); and Clear History; plus the web view's trust boundary (exact host match, http/https-only hand-off) and the concealed pasteboard type on every copy. About 120 checks, roughly 15 seconds, no network, no scrt.link account, no access to the app's Keychain item or history.
+
+It does use the general clipboard (the app copies links there) and restores the previous string afterwards. Switching *into* web mode is not exercised because that loads `https://scrt.link/` for real. Like the bridge test, it leaves a `~/Library/WebKit/e2e-native-flow-tests` data directory behind.
+
+## Update verification test
+
+```bash
+./tests/test-update-verification.sh
+```
+
+Builds the ad hoc app, compiles `Sources/UpdateManager.swift` with `tests/UpdateManagerTests/main.swift`, and checks the updater's release gates offline: the numeric version comparison, the download URL pinning (exact asset name, https, `github.com`, this repository's releases path, rejecting lookalike hosts, userinfo and port tricks, other repositories and path traversal), and `verifyUpdate` refusing the ad hoc build under every variation (no team ID, malformed team ID, wrong bundle ID, wrong version, missing bundle, and a correct team ID with an ad hoc signature). No network, no Keychain, no alerts, no app launch. The positive case, a Developer ID bundle passing, is exercised by the signed-release workflow's archive verification step.
+
+## Why not XCUITest?
+
+There is no Xcode project, and `smoke.sh` / `test-autoupdate.sh` already cover the launched-app checks that need Accessibility permission. The in-process suites above test the real AppKit views and the real harness HTML without any permission prompts, so they run in a plain shell and on the CI runner. Only scrt.link's own encryption module is faked.

@@ -17,7 +17,7 @@ All encryption happens client-side inside the app — scrt.link's servers never 
 - **Embedded Web UI fallback** — toggle on in Preferences if you need to create file secrets (not supported by the API).
 - **Client-side encryption** — secrets are encrypted in-app before upload using scrt.link's official JS client module (AES-GCM via WebCrypto).
 - **Local history** — last 500 secrets, no plaintext stored (only the link + metadata). Wipeable from the sidebar or the Secret Log window.
-- **GitHub-backed auto-update** — new releases prompt in-app and install in place.
+- **GitHub-backed auto-update** — new releases prompt in-app and install in place. The "Updating..." window stays up while the download is unpacked and verified in the background, and the signature and Gatekeeper checks run on the exact staged copy that gets installed.
 - **Launch at Login** — via `SMAppService`, no helper app needed.
 
 ---
@@ -53,7 +53,7 @@ No paid plan? Toggle **Use Web UI instead of native form** in Preferences to use
 5. Click **Create Secret**
 
 On success:
-- The link is copied to your clipboard
+- The link is copied to your clipboard, marked as concealed (`org.nspasteboard.ConcealedType`) so clipboard managers such as Paste, Maccy, Alfred and Raycast skip it instead of saving the link in their history. Every Copy button in the app does the same.
 - Shown in the result field with Copy / Open buttons
 - Added to the **Recent** sidebar on the left
 
@@ -81,6 +81,7 @@ For file secrets or free-tier usage:
 - Preferences → **Use Web UI instead of native form**
 - Main window swaps to scrt.link's embedded site
 - Cookies persist so you stay logged in
+- Only `scrt.link`, its subdomains and your configured custom host render inside the window. Links to any other site open in your default browser, and only `http`/`https` links are handed off; other URL schemes from page content are ignored.
 
 ---
 
@@ -140,7 +141,7 @@ Swift 6+, macOS 14+.
 open .build/ScrtLink.app
 ```
 
-Raw `swiftc` — no Xcode project, no SwiftPM.
+Raw `swiftc` — no Xcode project, no SwiftPM. `build.sh` compiles with `-O -wmo`, so this is the optimized binary `release.sh` signs and notarizes. The hidden crypto harness only accepts Safari's Web Inspector in a build compiled with `-D DEBUG`; release builds never expose it.
 
 ## Release
 
@@ -184,6 +185,8 @@ The script builds, signs with hardened runtime, verifies the pinned team and bun
 ./tests/test-ui-layout.sh       # sidebar + Secret Log view tree (headless)
 ./tests/test-keychain-store.sh  # token storage + legacy migration (throwaway Keychain item)
 ./tests/test-scrtlink-api.sh    # secret-creation bridge, offline fake module (headless)
+./tests/test-e2e-native-flow.sh # real window + form + sidebar + log, driven end to end (headless)
+./tests/test-update-verification.sh # updater's version, URL and signature gates (headless)
 ./tests/test-release-archive.sh # release ZIP survives both updaters' extraction
 ./tests/smoke.sh                # build + launch + UI probe (28+ checks)
 ./tests/test-autoupdate.sh      # end-to-end auto-update flow

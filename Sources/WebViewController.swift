@@ -234,26 +234,52 @@ class WebViewController: NSObject, WKNavigationDelegate, WKUIDelegate, NSWindowD
 
         // A just-created secret link (scrt.link/s#...) should open in the
         // default browser so we don't accidentally burn it.
-        if let host = url.host?.lowercased(), host.contains("scrt.link") {
+        if Self.isTrustedHost(url.host, customHost: Preferences.customHost) {
             if navigationAction.navigationType == .linkActivated && url.path.hasPrefix("/s") {
-                NSWorkspace.shared.open(url)
+                Self.openInBrowser(url)
                 decisionHandler(.cancel)
             } else {
                 decisionHandler(.allow)
             }
         } else if navigationAction.navigationType == .linkActivated {
-            NSWorkspace.shared.open(url)
+            Self.openInBrowser(url)
             decisionHandler(.cancel)
         } else {
             decisionHandler(.allow)
         }
     }
 
+    /// True only for scrt.link itself, its subdomains, and the configured
+    /// custom host. This is an exact comparison: lookalikes such as
+    /// "scrt.link.example.com" or "notscrt.link" must never render inside the
+    /// window users treat as the trusted scrt.link surface.
+    nonisolated static func isTrustedHost(_ host: String?, customHost: String) -> Bool {
+        guard let host = host?.lowercased(), !host.isEmpty else { return false }
+        if host == "scrt.link" || host.hasSuffix(".scrt.link") { return true }
+        let custom = customHost.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return !custom.isEmpty && host == custom
+    }
+
+    /// Hands only web URLs to the default browser. `NSWorkspace.open`
+    /// dispatches by scheme, so a crafted link or `window.open` from page
+    /// content could otherwise trigger tel:, file: or any custom scheme
+    /// registered on the Mac. Everything else is dropped. Returns whether the
+    /// URL was eligible.
+    @discardableResult
+    static func openInBrowser(_ url: URL) -> Bool {
+        guard let scheme = url.scheme?.lowercased(), scheme == "http" || scheme == "https",
+              let host = url.host, !host.isEmpty else {
+            return false
+        }
+        NSWorkspace.shared.open(url)
+        return true
+    }
+
     // MARK: - WKUIDelegate
 
     func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration, for navigationAction: WKNavigationAction, windowFeatures: WKWindowFeatures) -> WKWebView? {
         if let url = navigationAction.request.url {
-            NSWorkspace.shared.open(url)
+            Self.openInBrowser(url)
         }
         return nil
     }
