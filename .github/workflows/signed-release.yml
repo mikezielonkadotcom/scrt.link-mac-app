@@ -103,7 +103,12 @@ jobs:
           ditto -x -k "$ZIP" "$WORK/current"
           for APP in "$WORK/legacy/ScrtLink.app" "$WORK/current/ScrtLink.app"; do
             codesign --verify --deep --strict -R="$REQUIREMENT" "$APP"
-            xcrun stapler validate "$APP"
+            for attempt in 1 2 3 4 5; do
+              xcrun stapler validate "$APP" && break
+              [[ "$attempt" -lt 5 ]] || exit 68
+              echo "stapler validate attempt $attempt failed (Apple ticket lookup); retrying" >&2
+              sleep $((attempt * 10))
+            done
             spctl --assess --type execute --verbose=2 "$APP"
             [[ "$(plutil -extract CFBundleShortVersionString raw "$APP/Contents/Info.plist")" == "$VERSION" ]]
           done
