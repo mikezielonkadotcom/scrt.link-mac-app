@@ -47,6 +47,19 @@ if [[ "$PUBLISH" == "--publish" ]]; then
     }
 fi
 
+# Apple's notarization ticket lookup (api.apple-cloudkit.com) drops
+# connections now and then, especially on hosted runners. The stapler calls
+# are the only network-bound steps after notarization, so retry them.
+retry() {
+    local attempt
+    for attempt in 1 2 3 4 5; do
+        if "$@"; then return 0; fi
+        echo "Attempt $attempt of 5 failed: $*" >&2
+        [[ "$attempt" -lt 5 ]] && sleep $((attempt * 10))
+    done
+    return 1
+}
+
 ./build.sh
 APP_BUNDLE=".build/ScrtLink.app"
 ZIP_FILE=".build/ScrtLink-v$VERSION.zip"
@@ -64,8 +77,8 @@ if [[ -n "${NOTARY_KEYCHAIN:-}" ]]; then
     NOTARY_OPTIONS+=(--keychain "$NOTARY_KEYCHAIN")
 fi
 xcrun notarytool submit "$ZIP_FILE" "${NOTARY_OPTIONS[@]}" --wait
-xcrun stapler staple "$APP_BUNDLE"
-xcrun stapler validate "$APP_BUNDLE"
+retry xcrun stapler staple "$APP_BUNDLE"
+retry xcrun stapler validate "$APP_BUNDLE"
 spctl --assess --type execute --verbose "$APP_BUNDLE"
 codesign --verify --deep --strict -R="$REQUIREMENT" "$APP_BUNDLE"
 
