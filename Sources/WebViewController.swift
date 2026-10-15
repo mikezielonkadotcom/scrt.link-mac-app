@@ -205,11 +205,16 @@ class WebViewController: NSObject, WKNavigationDelegate, WKUIDelegate, NSWindowD
 
     func clearWebsiteData() {
         let dataTypes = WKWebsiteDataStore.allWebsiteDataTypes()
-        WKWebsiteDataStore.default().removeData(ofTypes: dataTypes, modifiedSince: .distantPast) { @MainActor [weak self] in
-            guard let self else { return }
-            self.hasLoadedWeb = false
-            if self.currentMode == .web {
-                self.webView.load(URLRequest(url: self.homeURL))
+        // The completion handler is only main-actor annotated on newer SDKs,
+        // and older toolchains reject a @MainActor closure here under whole-
+        // module optimization. Hop explicitly instead of annotating the closure.
+        WKWebsiteDataStore.default().removeData(ofTypes: dataTypes, modifiedSince: .distantPast) { [weak self] in
+            Task { @MainActor in
+                guard let self else { return }
+                self.hasLoadedWeb = false
+                if self.currentMode == .web {
+                    self.webView.load(URLRequest(url: self.homeURL))
+                }
             }
         }
     }
