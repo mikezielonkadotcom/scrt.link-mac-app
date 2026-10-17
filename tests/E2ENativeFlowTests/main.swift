@@ -195,9 +195,44 @@ for bad in ["tel:+15555550100", "file:///etc/hosts", "x-apple.systempreferences:
     }
 }
 
+// Custom host validation (audit S6): the token is sent to this host, so only
+// a bare hostname is accepted.
+print("▸ Custom host validation")
+check(Preferences.normalizedCustomHost("") == "", "empty clears the setting")
+check(Preferences.normalizedCustomHost("secrets.example.com") == "secrets.example.com", "plain hostname is accepted")
+check(Preferences.normalizedCustomHost("  HTTPS://Secrets.Example.com/  ") == "secrets.example.com",
+      "scheme, slashes, whitespace and case are normalized away")
+check(Preferences.normalizedCustomHost("http://secrets.example.com") == "secrets.example.com", "http:// prefix is tolerated")
+for bad in ["secrets.example.com:8443", "secrets.example.com/api", "user@secrets.example.com",
+            "secrets.example.com?x=1", "secrets.example.com#frag", "localhost", "secrets", ".example.com",
+            "example.com.", "secrets example.com", "https://", "scrt.link/../evil.example"] {
+    check(Preferences.normalizedCustomHost(bad) == nil, "\(bad) is refused")
+}
+
+// Harness CSP (audit S7): scripts from scrt.link only, connections to
+// scrt.link plus the configured custom host, nothing else.
+print("▸ Harness content security policy")
+let appCSP = ScrtLinkAPI.contentSecurityPolicy(customHost: "")
+check(appCSP.contains("default-src 'none'"), "everything not listed is blocked")
+check(appCSP.contains("script-src 'unsafe-inline' https://scrt.link;"), "scripts: inline bootstrap and scrt.link only")
+check(appCSP.contains("connect-src https://scrt.link;"), "connections: scrt.link only when no custom host is set")
+check(!appCSP.contains("data:"), "the app's own policy never allows data: scripts")
+let hostCSP = ScrtLinkAPI.contentSecurityPolicy(customHost: "https://Secrets.Example.com/")
+check(hostCSP.contains("connect-src https://scrt.link https://secrets.example.com;"), "a configured custom host is allowed, normalized")
+check(ScrtLinkAPI.contentSecurityPolicy(customHost: "not a host").contains("connect-src https://scrt.link;"),
+      "an invalid custom host is not added to the policy")
+let document = ScrtLinkAPI.harnessDocument(realHarness, contentSecurityPolicy: appCSP)
+if let metaAt = document.range(of: "http-equiv=\"Content-Security-Policy\"")?.lowerBound,
+   let scriptAt = document.range(of: "<script")?.lowerBound {
+    check(metaAt < scriptAt, "CSP meta precedes the first script in the harness document")
+} else {
+    check(false, "CSP meta or script tag missing from the harness document")
+}
+
 @MainActor
 func makeAPI(token: String) -> ScrtLinkAPI {
-    ScrtLinkAPI(harnessHTML: { workingHarness }, tokenProvider: { token }, timeoutSeconds: 10)
+    // `data:` lets the inline fake module through the CSP in tests only.
+    ScrtLinkAPI(harnessHTML: { workingHarness }, tokenProvider: { token }, timeoutSeconds: 10, extraScriptSources: ["data:"])
 }
 let offlineAPI = makeAPI(token: fakeToken)
 ScrtLinkAPI.shared = offlineAPI
@@ -217,6 +252,7 @@ guard let mainWindow = app.windows.first(where: { $0.title == "Scrt.link" }),
       let content = mainWindow.contentView else { fail("main window was not created") }
 spin(timeout: 0.3)  // the split position is applied on the next run-loop turn
 content.layoutSubtreeIfNeeded()
+check(!controller.hasWebView, "no embedded web view is created at launch in native mode")
 
 guard let split = content as? NSSplitView else { fail("native mode content is not the split view") }
 check(split.arrangedSubviews.count == 2, "split view has sidebar and form panes")
@@ -508,5 +544,9 @@ check(cardStack.arrangedSubviews.isEmpty && !sidebarEmpty.isHidden, "sidebar ret
 check(clearHistoryButton.isHidden, "Clear History hides again")
 check(table.numberOfRows == 0, "log table is empty")
 check(labels(in: logContent).contains("No secrets logged yet."), "log shows its empty message")
+
+print("")
+print("▸ Web view stays lazy")
+check(!controller.hasWebView, "the embedded web view was never created during native-mode use")
 
 finish()

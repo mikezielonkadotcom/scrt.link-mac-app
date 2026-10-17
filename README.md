@@ -92,7 +92,8 @@ For file secrets or free-tier usage:
 | Launch at Login | Starts the app on login (`SMAppService`) |
 | Show in Dock | Toggles `.regular` ↔ `.accessory` activation policy |
 | API Token | Bearer token for scrt.link API (stored in macOS Keychain) |
-| Use Web UI | Swaps native form for embedded scrt.link web view |
+| Use Web UI | Swaps native form for embedded scrt.link web view (created only when first shown) |
+| Domain | Optional white-label host for created links (Secret Service tier). Must be a bare hostname such as `secrets.yourdomain.com`; paths, ports and credentials are refused because the API token is sent to this host |
 | Clear Website Data | Clears cookies/cache for the embedded web view |
 
 ---
@@ -212,7 +213,7 @@ See [tests/README.md](tests/README.md) for what each step covers.
 
 **API token security.** Your scrt.link bearer token is stored in macOS Keychain. On first launch, the app moves any token saved by an older version from `UserDefaults` into Keychain and removes the old copy after a successful write. If you suspect a token has been exposed, revoke it on scrt.link and update it in Preferences.
 
-**Analytics / telemetry.** None. This app makes two categories of network calls: (1) requests to `https://scrt.link/api/*` to create secrets, and (2) an update check against `api.github.com/repos/mikezielonkadotcom/scrt.link-mac-app/releases/latest` shortly after launch. Nothing is sent anywhere else.
+**Analytics / telemetry.** None. This app makes two categories of network calls: (1) requests to `https://scrt.link/api/*` to create secrets (or to the custom domain you configured, and only to that), and (2) an update check against `api.github.com/repos/mikezielonkadotcom/scrt.link-mac-app/releases/latest` shortly after launch. Nothing is sent anywhere else, and the hidden page that runs scrt.link's encryption module carries a Content Security Policy that blocks every other origin.
 
 ---
 

@@ -53,6 +53,15 @@ class UpdateManager {
             return
         }
 
+        // A rate-limited or failing GitHub returns a JSON body with no
+        // tag_name; say so instead of calling it a parse error.
+        if let httpFailure = Self.describeHTTPFailure(response) {
+            if !silent {
+                showAlert(title: "Update Check Failed", message: httpFailure)
+            }
+            return
+        }
+
         guard let data = data,
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let tagName = json["tag_name"] as? String else {
@@ -264,6 +273,20 @@ class UpdateManager {
     private func updateError(_ message: String) -> NSError {
         NSError(domain: "com.mikezielonka.scrt-link.update", code: 1,
                 userInfo: [NSLocalizedDescriptionKey: message])
+    }
+
+    /// A user-facing message for a non-success HTTP status from the release
+    /// API, or nil when the response is a success (or not HTTP at all).
+    nonisolated static func describeHTTPFailure(_ response: URLResponse?) -> String? {
+        guard let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) else { return nil }
+        switch http.statusCode {
+        case 403, 429:
+            return "GitHub rate-limited the update check (HTTP \(http.statusCode)). Try again in a few minutes."
+        case 404:
+            return "GitHub reported no published release (HTTP 404)."
+        default:
+            return "GitHub returned HTTP \(http.statusCode) for the release information."
+        }
     }
 
     // MARK: - Release gates

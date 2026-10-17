@@ -123,6 +123,30 @@ enum Preferences {
         }
     }
 
+    /// Reduces what the user typed to a bare hostname, or nil when it is not
+    /// one. The bearer token is sent to `https://<host>/api/v1/secrets`, so
+    /// anything that is not a plain host (a path, port, userinfo, query or
+    /// fragment) is refused rather than silently forwarded. A leading scheme
+    /// and trailing slashes are tolerated because people paste URLs.
+    nonisolated static func normalizedCustomHost(_ raw: String) -> String? {
+        var value = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        if value.isEmpty { return "" }
+        for prefix in ["https://", "http://"] where value.lowercased().hasPrefix(prefix) {
+            value = String(value.dropFirst(prefix.count))
+        }
+        while value.hasSuffix("/") { value.removeLast() }
+        guard !value.isEmpty, !value.contains(" "),
+              let components = URLComponents(string: "https://" + value),
+              let host = components.host?.lowercased(), !host.isEmpty,
+              components.user == nil, components.password == nil, components.port == nil,
+              components.path.isEmpty, components.query == nil, components.fragment == nil,
+              host.contains("."), !host.hasPrefix("."), !host.hasSuffix("."),
+              host.range(of: "^[a-z0-9.-]+$", options: .regularExpression) != nil else {
+            return nil
+        }
+        return host
+    }
+
     // MARK: - Global hotkey
 
     static let defaultShortcut = ShortcutSpec(

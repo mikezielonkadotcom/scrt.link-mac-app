@@ -9,6 +9,12 @@ enum KeychainStore {
     private static let account = "apiToken"
     private static let legacyDefaultsKey = "scrtLinkApiToken"
 
+    /// Last value read from or written to Keychain in this process. Avoids a
+    /// Keychain round trip for every `hasToken` check; `setApiToken` keeps it
+    /// current, and a legacy UserDefaults value still takes precedence below.
+    /// Like `service`, this is only touched from the main thread.
+    nonisolated(unsafe) private static var cachedToken: String?
+
     private static var query: [String: Any] {
         [
             kSecClass as String: kSecClassGenericPassword,
@@ -18,6 +24,22 @@ enum KeychainStore {
     }
 
     static var apiToken: String {
+        // Builds with Keychain storage never write UserDefaults, so a legacy
+        // value was written by an older build, for example after a rollback
+        // to 1.6.0, and is the newest token. Move it into Keychain even when
+        // an item already exists, so no plaintext copy is left behind.
+        if let legacyToken = UserDefaults.standard.string(forKey: legacyDefaultsKey), !legacyToken.isEmpty {
+            if (try? setApiToken(legacyToken)) != nil { return legacyToken }
+        }
+        if let cachedToken { return cachedToken }
+        let token = readKeychainToken()
+        if let token { cachedToken = token }
+        return token ?? ""
+    }
+
+    /// The Keychain value, "" when there is no item, or nil on an access
+    /// error (which is deliberately not cached so the next read retries).
+    private static func readKeychainToken() -> String? {
         var lookup = query
         lookup[kSecReturnData as String] = true
         lookup[kSecMatchLimit as String] = kSecMatchLimitOne
@@ -30,20 +52,8 @@ enum KeychainStore {
 
         // A Keychain access error must never silently make the app fall back
         // to a less protected store.
-        guard status == errSecSuccess || status == errSecItemNotFound else { return "" }
-
-        // Builds with Keychain storage never write UserDefaults, so a legacy
-        // value was written by an older build, for example after a rollback
-        // to 1.6.0, and is the newest token. Move it into Keychain even when
-        // an item already exists, so no plaintext copy is left behind.
-        guard let legacyToken = UserDefaults.standard.string(forKey: legacyDefaultsKey),
-              !legacyToken.isEmpty else { return stored ?? "" }
-        do {
-            try setApiToken(legacyToken)
-            return legacyToken
-        } catch {
-            return stored ?? ""
-        }
+        guard status == errSecSuccess || status == errSecItemNotFound else { return nil }
+        return stored ?? ""
     }
 
     static var hasToken: Bool { !apiToken.isEmpty }
@@ -71,6 +81,7 @@ enum KeychainStore {
 
         // Remove any pre-Keychain copy only after the Keychain operation succeeds.
         UserDefaults.standard.removeObject(forKey: legacyDefaultsKey)
+        cachedToken = token
         NotificationCenter.default.post(name: .apiTokenChanged, object: nil)
     }
 

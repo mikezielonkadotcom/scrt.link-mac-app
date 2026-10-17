@@ -4,31 +4,40 @@ import WebKit
 @MainActor
 class WebViewController: NSObject, WKNavigationDelegate, WKUIDelegate, NSWindowDelegate {
     private var window: NSWindow!
-    private var webView: WKWebView!
+    /// The embedded scrt.link web UI. Created the first time web mode is
+    /// shown, never at launch: a WKWebView spawns WebKit content and
+    /// networking processes, and most users stay in native mode all day.
+    private var webView: WKWebView?
     private var nativeForm: NativeSecretFormView?
     private var nativeContainer: NSView?  // split view with sidebar + form
     private var historySidebar: HistorySidebarView?
     private let homeURL = URL(string: "https://scrt.link/")!
     private var hasLoadedWeb = false
     private var currentMode: Mode = .native
+    /// Mode the toolbar was last built for; rebuilt only when it changes.
+    private var toolbarMode: Mode?
 
     private enum Mode { case native, web }
 
+    /// Whether the embedded web UI has been created. Tests check it stays
+    /// lazy while the app is used in native mode.
+    var hasWebView: Bool { webView != nil }
+
     override init() {
         super.init()
-        setupWebView()
         setupWindow()
     }
 
-    private func setupWebView() {
+    private func makeWebView() -> WKWebView {
         let config = WKWebViewConfiguration()
         config.websiteDataStore = WKWebsiteDataStore.default()
         config.preferences.isElementFullscreenEnabled = true
 
-        webView = WKWebView(frame: .zero, configuration: config)
-        webView.navigationDelegate = self
-        webView.uiDelegate = self
-        webView.allowsBackForwardNavigationGestures = true
+        let view = WKWebView(frame: .zero, configuration: config)
+        view.navigationDelegate = self
+        view.uiDelegate = self
+        view.allowsBackForwardNavigationGestures = true
+        return view
     }
 
     private func setupWindow() {
@@ -120,18 +129,22 @@ class WebViewController: NSObject, WKNavigationDelegate, WKUIDelegate, NSWindowD
             window.contentView = nativeContainer
             window.title = "Scrt.link"
         case .web:
+            let view = webView ?? makeWebView()
+            webView = view
             if !hasLoadedWeb {
-                webView.load(URLRequest(url: homeURL))
+                view.load(URLRequest(url: homeURL))
                 hasLoadedWeb = true
             }
-            window.contentView = webView
+            window.contentView = view
             window.title = "Scrt.link"
         }
         currentMode = desired
-        // Rebuild toolbar items — native mode doesn't need nav controls
-        window.toolbar?.delegate = self
-        if let t = window.toolbar {
-            // Force rebuild by re-assigning the identifier set
+        // Rebuild toolbar items only when the mode changed: native mode has
+        // no nav controls. showWindow() calls applyMode() on every menu bar
+        // click, and tearing the toolbar down each time is wasted work.
+        if toolbarMode != desired, let t = window.toolbar {
+            toolbarMode = desired
+            t.delegate = self
             while t.items.count > 0 {
                 t.removeItem(at: 0)
             }
@@ -156,6 +169,12 @@ class WebViewController: NSObject, WKNavigationDelegate, WKUIDelegate, NSWindowD
         // Restore the user's preferred Dock visibility — closing the window
         // earlier would have demoted us to .accessory.
         DockManager.applyActivationPolicy(show: DockManager.isShowingInDock)
+        // Start loading the crypto harness while the user is still typing, so
+        // the first Create does not also wait for the client-module import.
+        // Only when a token exists: without one no network call is possible.
+        if currentMode == .native, KeychainStore.hasToken {
+            ScrtLinkAPI.shared.warmUp()
+        }
     }
 
     /// Recenter if the saved frame landed off-screen (e.g. monitor was
@@ -213,7 +232,7 @@ class WebViewController: NSObject, WKNavigationDelegate, WKUIDelegate, NSWindowD
                 guard let self else { return }
                 self.hasLoadedWeb = false
                 if self.currentMode == .web {
-                    self.webView.load(URLRequest(url: self.homeURL))
+                    self.webView?.load(URLRequest(url: self.homeURL))
                 }
             }
         }
@@ -225,7 +244,7 @@ class WebViewController: NSObject, WKNavigationDelegate, WKUIDelegate, NSWindowD
             nativeForm?.reset()
             historySidebar?.reload()
         case .web:
-            webView.reload()
+            webView?.reload()
         }
     }
 
@@ -377,11 +396,11 @@ extension WebViewController: NSToolbarDelegate {
     }
 
     @objc private func goBack() {
-        webView.goBack()
+        webView?.goBack()
     }
 
     @objc private func goForward() {
-        webView.goForward()
+        webView?.goForward()
     }
 
     @objc private func doReload() {
@@ -390,7 +409,7 @@ extension WebViewController: NSToolbarDelegate {
 
     @objc private func goHome() {
         if currentMode == .web {
-            webView.load(URLRequest(url: homeURL))
+            webView?.load(URLRequest(url: homeURL))
         }
     }
 }
