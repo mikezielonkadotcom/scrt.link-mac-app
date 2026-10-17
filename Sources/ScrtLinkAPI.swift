@@ -54,17 +54,29 @@ class ScrtLinkAPI: NSObject {
     private var lastRequestID = 0
     /// Starts the pending request once the harness is ready.
     private var queued: (() -> Void)?
+    /// Extra `script-src` origins for the harness CSP. Tests pass `data:` so
+    /// their inline fake module may load; the app passes nothing.
+    private let extraScriptSources: [String]
+    /// The custom host baked into the loaded harness's CSP. A changed
+    /// preference reloads the harness so the new host is allowed.
+    private var loadedCustomHost = ""
 
     /// Tests inject an offline harness, a fake token, and a short timeout.
     init(
         harnessHTML: @escaping () -> String? = ScrtLinkAPI.bundledHarnessHTML,
         tokenProvider: @escaping () -> String = { KeychainStore.apiToken },
-        timeoutSeconds: Double = 15
+        timeoutSeconds: Double = 15,
+        extraScriptSources: [String] = []
     ) {
         self.harnessHTML = harnessHTML
         self.tokenProvider = tokenProvider
         self.timeoutSeconds = timeoutSeconds
+        self.extraScriptSources = extraScriptSources
         let config = WKWebViewConfiguration()
+        // The harness is a stateless crypto sandbox: no cookies from the
+        // embedded web UI should ride along on its API calls, and nothing it
+        // does needs to persist across launches.
+        config.websiteDataStore = .nonPersistent()
         let ucc = WKUserContentController()
         config.userContentController = ucc
         webView = WKWebView(frame: .zero, configuration: config)
@@ -134,6 +146,45 @@ class ScrtLinkAPI: NSObject {
         return try? String(contentsOf: url, encoding: .utf8)
     }
 
+    /// The custom host the next harness load and create should use: the
+    /// normalized preference, "" when none is set, or nil when the stored
+    /// value is not a plain hostname.
+    private static func currentCustomHost() -> String? {
+        Preferences.normalizedCustomHost(Preferences.customHost)
+    }
+
+    /// Bounds what the harness page may do if scrt.link's module were ever
+    /// compromised or redirected: the inline bootstrap scripts plus scripts
+    /// from scrt.link, and connections to scrt.link and the configured custom
+    /// host. Nothing else loads. (scrt.link's module makes exactly one fetch,
+    /// to `/api/v1/secrets` on scrt.link or the custom host.)
+    nonisolated static func contentSecurityPolicy(customHost: String, extraScriptSources: [String] = []) -> String {
+        var connect = ["https://scrt.link"]
+        if let host = Preferences.normalizedCustomHost(customHost), !host.isEmpty {
+            connect.append("https://" + host)
+        }
+        let script = (["'unsafe-inline'", "https://scrt.link"] + extraScriptSources).joined(separator: " ")
+        return "default-src 'none'; script-src \(script); connect-src \(connect.joined(separator: " ")); "
+            + "base-uri 'none'; form-action 'none'"
+    }
+
+    /// Inserts the CSP as the first element of `<head>` so it governs every
+    /// script in the document, including the module import.
+    nonisolated static func harnessDocument(_ html: String, contentSecurityPolicy: String) -> String {
+        let meta = "<meta http-equiv=\"Content-Security-Policy\" content=\"\(contentSecurityPolicy)\">"
+        if let range = html.range(of: "<head>", options: .caseInsensitive) {
+            return html.replacingCharacters(in: range, with: "<head>" + meta)
+        }
+        return meta + html
+    }
+
+    /// Loads the harness ahead of the first Create so the client-module
+    /// import does not land on the user's first click. A harness that failed
+    /// earlier (for example offline at launch) is reloaded.
+    func warmUp() {
+        if harnessFailed { loadHarness() }
+    }
+
     private func loadHarness() {
         isReady = false
         harnessFailed = false
@@ -143,7 +194,13 @@ class ScrtLinkAPI: NSObject {
             handleLog("harness resource missing")
             return
         }
-        harnessNavigation = webView.loadHTMLString(html, baseURL: URL(string: "https://scrt.link/")!)
+        let customHost = Self.currentCustomHost() ?? ""
+        loadedCustomHost = customHost
+        let document = Self.harnessDocument(
+            html,
+            contentSecurityPolicy: Self.contentSecurityPolicy(customHost: customHost, extraScriptSources: extraScriptSources)
+        )
+        harnessNavigation = webView.loadHTMLString(document, baseURL: URL(string: "https://scrt.link/")!)
     }
 
     /// Marks the harness unusable and fails the in-flight request right away
@@ -183,6 +240,12 @@ class ScrtLinkAPI: NSObject {
             completion(.failure(.server("Another secret is still being created.")))
             return
         }
+        // The token is sent to https://<custom host>/api/v1/secrets, so refuse
+        // a stored value that is not a plain hostname instead of forwarding it.
+        guard let customHost = Self.currentCustomHost() else {
+            completion(.failure(.server("The custom domain in Preferences is not a valid hostname. Fix or clear it.")))
+            return
+        }
         lastRequestID += 1
         let requestID = lastRequestID
         pending = (requestID, completion)
@@ -196,7 +259,6 @@ class ScrtLinkAPI: NSObject {
         // White-label host (Secret Service tier). When set, scrt.link's
         // client module POSTs to https://<host>/api/v1/secrets and returns
         // a link on that host.
-        let customHost = Preferences.customHost
         if !customHost.isEmpty { opts["host"] = customHost }
 
         let optsJSON = jsonString(from: opts) ?? "{}"
@@ -225,6 +287,10 @@ class ScrtLinkAPI: NSObject {
 
         if harnessFailed {
             handleLog("reloading harness after an earlier failure")
+            loadHarness()
+        } else if loadedCustomHost != customHost {
+            // The CSP allows connections only to the host it was loaded with.
+            handleLog("reloading harness for a changed custom host")
             loadHarness()
         }
         if isReady {

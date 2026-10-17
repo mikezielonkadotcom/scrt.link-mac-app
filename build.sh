@@ -1,5 +1,5 @@
 #!/bin/bash
-set -e
+set -euo pipefail
 
 APP="ScrtLink"
 BUILD_DIR=".build"

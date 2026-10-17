@@ -100,7 +100,9 @@ check(realHarness.contains("'\(moduleURL)'"), "real harness imports the scrt.lin
 
 @MainActor
 func makeAPI(timeout: Double, html: @escaping () -> String?) -> ScrtLinkAPI {
-    ScrtLinkAPI(harnessHTML: html, tokenProvider: { fakeToken }, timeoutSeconds: timeout)
+    // `data:` lets the inline fake module through the harness CSP, which
+    // otherwise allows scripts from scrt.link only.
+    ScrtLinkAPI(harnessHTML: html, tokenProvider: { fakeToken }, timeoutSeconds: timeout, extraScriptSources: ["data:"])
 }
 
 // --- Happy path + diagnostic privacy -----------------------------------------

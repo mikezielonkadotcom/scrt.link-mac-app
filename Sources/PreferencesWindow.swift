@@ -291,16 +291,18 @@ class PreferencesWindow {
     // MARK: - Custom host
 
     @objc private func saveCustomHost() {
-        let host = customHostField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-        // Basic sanitization — users might paste "https://..."; strip it.
-        let cleaned = host
-            .replacingOccurrences(of: "https://", with: "")
-            .replacingOccurrences(of: "http://", with: "")
-            .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        let alert = NSAlert()
+        guard let cleaned = Preferences.normalizedCustomHost(customHostField.stringValue) else {
+            alert.messageText = "Custom Domain Not Saved"
+            alert.informativeText = "Enter just a hostname, such as secrets.yourdomain.com. Paths, ports and credentials are not allowed because the API token is sent to this host."
+            alert.alertStyle = .warning
+            alert.addButton(withTitle: "OK")
+            alert.runModal()
+            return
+        }
         Preferences.customHost = cleaned
         customHostField.stringValue = cleaned
 
-        let alert = NSAlert()
         alert.messageText = cleaned.isEmpty ? "Custom Domain Cleared" : "Custom Domain Saved"
         alert.informativeText = cleaned.isEmpty
             ? "New secrets will use scrt.link."

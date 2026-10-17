@@ -49,6 +49,20 @@ check(newer("1.6.0.1", "1.6.0"), "extra component can make it newer")
 check(!newer("garbage", "1.6.1"), "non-numeric remote tag is never newer")
 check(newer("1.6.1", "0.0.0"), "anything beats the 0.0.0 fallback")
 
+// --- HTTP status handling -------------------------------------------------------
+
+print("")
+print("▸ HTTP status handling")
+func http(_ status: Int) -> URLResponse {
+    HTTPURLResponse(url: URL(string: "https://api.github.com/x")!, statusCode: status, httpVersion: nil, headerFields: nil)!
+}
+check(UpdateManager.describeHTTPFailure(nil) == nil, "no response → no HTTP failure (error path handles it)")
+check(UpdateManager.describeHTTPFailure(http(200)) == nil, "200 is not a failure")
+check(UpdateManager.describeHTTPFailure(http(403))?.contains("rate-limited") == true, "403 is reported as a rate limit")
+check(UpdateManager.describeHTTPFailure(http(429))?.contains("rate-limited") == true, "429 is reported as a rate limit")
+check(UpdateManager.describeHTTPFailure(http(404))?.contains("404") == true, "404 is reported as no release")
+check(UpdateManager.describeHTTPFailure(http(502))?.contains("502") == true, "other statuses name the code")
+
 // --- Download URL pinning ---------------------------------------------------
 
 print("")
